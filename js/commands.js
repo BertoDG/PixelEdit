@@ -161,6 +161,7 @@ function registerCommands() {
   /* Archivo */
   cmd('file.new', 'Archivo', 'Nuevo lienzo…', 'Ctrl+Alt+N', dlgNew);
   cmd('file.open', 'Archivo', 'Abrir (proyecto o imagen)…', 'Ctrl+O', () => openFileDialog('open'));
+  cmd('file.convert', 'Archivo', 'Convertir imagen a pixel art…', 'Ctrl+Alt+P', convertFromFileDialog);
   cmd('file.save', 'Archivo', 'Guardar proyecto', 'Ctrl+S', saveProject);
   cmd('file.export', 'Archivo', 'Exportar (PNG, GIF, hoja de sprites)…', 'Ctrl+Shift+E', dlgExport);
   cmd('file.quickExport', 'Archivo', 'Repetir última exportación', 'Ctrl+E', quickExport);

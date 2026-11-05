@@ -499,12 +499,11 @@ async function openFile(file) {
       replaceDoc(doc, obj.name || base);
       toast('Proyecto abierto');
     } else if (file.type.startsWith('image/')) {
-      const url = URL.createObjectURL(file);
-      const img = await loadImage(url);
-      URL.revokeObjectURL(url);
-      const { w, h, data } = imageToU32(img);
-      if (w > 2048 || h > 2048) return toast('Imagen demasiado grande (máx. 2048 px)');
-      replaceDoc(makeDoc(w, h, { layers: [new Layer(base || 'Imagen', [new Cel(w, h, data)])] }), base);
+      const img = await fileToImage(file);
+      const w = img.naturalWidth, h = img.naturalHeight;
+      // Una imagen grande casi seguro es una foto/ilustración: ofrecemos convertirla
+      if (w > 256 || h > 256) return openConverter(img, base, true);
+      openRawImage(img, base);
       toast(`Imagen abierta ${w}×${h}`);
     } else toast('Formato no soportado');
   } catch (err) {

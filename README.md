@@ -49,6 +49,18 @@ Cada capa tiene un *cel* por fotograma. La línea de tiempo está bajo el lienzo
 Los fps se cambian en la línea de tiempo. Haz doble clic en un fotograma para darle una duración propia.
 **Exportar** (`Ctrl+Shift+E`): PNG del fotograma actual, **GIF animado** o **hoja de sprites** (con columnas configurables).
 
+## Convertir una imagen a pixel art
+
+*Convertir imagen* (barra superior, `Ctrl+Alt+P` o el menú ☰ en el móvil). También aparece solo al
+abrir o arrastrar una imagen de más de 256 px. Ajustes con vista previa en directo:
+
+- **Ancho** del resultado (el alto mantiene la proporción) y **número de colores**.
+- **Paleta**: automática (elige los mejores colores) o **tu paleta actual**, útil para que todo un juego comparta colores.
+- **Reducción** *nítida* (color dominante de cada bloque, bordes limpios) o *suave* (promedio).
+- **Tramado**: ninguno, ordenado (patrón clásico) o difuso.
+- **Saturación** y **contraste**, **quitar fondo** (con tolerancia), **limpiar píxeles sueltos** y **contorno oscuro**.
+- El resultado puede ser un **dibujo nuevo** (con su paleta) o una **capa nueva** en el dibujo actual. Las dos cosas se pueden deshacer.
+
 ## Escenarios
 
 - **Cuadrícula de tiles** (`Ctrl+Shift+G`, tamaño en *Tamaño de tile…*), aparte de la cuadrícula de píxeles.
@@ -122,6 +134,7 @@ js/util.js        colores, algoritmos de líneas/elipses, utilidades DOM
 js/doc.js         capas, fotogramas (cels), estado, historial, selección flotante
 js/anim.js        línea de tiempo, reproducción y exportación (GIF, hoja de sprites)
 js/gif.js         codificador de GIF animado propio
+js/convert.js     convertidor de imagen a pixel art
 js/view.js        zoom, desplazamiento y dibujado del lienzo
 js/tools.js       herramientas
 js/commands.js    comandos y atajos de teclado

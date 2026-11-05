@@ -1,9 +1,9 @@
 // Service worker: permite usar PixelEdit sin conexión una vez visitado.
 // Sube CACHE de versión cuando cambien los archivos.
-const CACHE = 'pixeledit-v3';
+const CACHE = 'pixeledit-v4';
 const FILES = [
   './', 'index.html', 'css/style.css', 'manifest.webmanifest',
-  'js/util.js', 'js/doc.js', 'js/view.js', 'js/tools.js', 'js/gif.js', 'js/anim.js',
+  'js/util.js', 'js/doc.js', 'js/view.js', 'js/tools.js', 'js/gif.js', 'js/anim.js', 'js/convert.js',
   'js/commands.js', 'js/ui.js', 'js/main.js',
   'icons/icon-192.png', 'icons/icon-512.png', 'icons/apple-touch-icon.png',
 ];
