@@ -1,0 +1,110 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>PixelEdit</title>
+  <link rel="stylesheet" href="css/style.css">
+</head>
+<body>
+  <div id="app">
+    <header id="topbar">
+      <div class="brand"><span class="logo"></span>PixelEdit</div>
+      <nav class="file-actions">
+        <button data-cmd="file.new">Nuevo</button>
+        <button data-cmd="file.open">Abrir</button>
+        <button data-cmd="file.save">Guardar</button>
+        <button data-cmd="file.export">Exportar</button>
+      </nav>
+      <div id="tool-options"></div>
+      <button id="cmd-button" data-cmd="ui.palette">Buscar acción… <kbd>Ctrl K</kbd></button>
+      <button class="round" data-cmd="ui.help" title="Atajos (?)">?</button>
+    </header>
+
+    <aside id="toolbar"></aside>
+
+    <main id="viewport">
+      <canvas id="view"></canvas>
+    </main>
+
+    <aside id="sidebar">
+      <section class="panel">
+        <div class="colors">
+          <div class="swatch-pair">
+            <button id="sw-primary" class="swatch big" title="Color 1 · clic izquierdo (C para editar)"></button>
+            <button id="sw-secondary" class="swatch big second" title="Color 2 · clic derecho"></button>
+            <button id="swap-colors" class="mini" title="Intercambiar (X)">⇄</button>
+          </div>
+          <div class="color-fields">
+            <label class="hex"><span>#</span><input id="hex-input" maxlength="8" spellcheck="false"></label>
+            <label class="alpha" title="Opacidad del color 1">
+              <input id="alpha-input" type="range" min="0" max="255">
+              <span id="alpha-val"></span>
+            </label>
+          </div>
+        </div>
+        <div class="sub">Rampa <span class="muted">Q oscurecer · W aclarar</span></div>
+        <div id="ramp" class="swatches ramp"></div>
+      </section>
+
+      <section class="panel">
+        <div class="panel-head">
+          <h3>Paleta</h3>
+          <button id="pal-add" class="mini" title="Añadir color 1 (Shift+A)">+</button>
+          <button id="pal-menu" class="mini" title="Opciones de paleta">⋯</button>
+        </div>
+        <div id="palette" class="swatches"></div>
+        <div class="sub">Recientes</div>
+        <div id="recent" class="swatches"></div>
+      </section>
+
+      <section class="panel layers-panel">
+        <div class="panel-head">
+          <h3>Capas</h3>
+          <button id="ly-add" class="mini" title="Nueva capa (Shift+N)">+</button>
+          <button id="ly-dup" class="mini" title="Duplicar (Shift+D)">⧉</button>
+          <button id="ly-merge" class="mini" title="Combinar abajo (Shift+M)">⤓</button>
+          <button id="ly-up" class="mini" title="Subir (Shift+RePág)">▲</button>
+          <button id="ly-down" class="mini" title="Bajar (Shift+AvPág)">▼</button>
+          <button id="ly-del" class="mini danger" title="Eliminar (Shift+Supr)">✕</button>
+        </div>
+        <div id="layers"></div>
+        <label class="opacity">Opacidad
+          <input id="layer-opacity" type="range" min="0" max="100">
+          <span id="layer-opacity-val"></span>
+        </label>
+      </section>
+
+      <section class="panel">
+        <div class="panel-head"><h3>Vista previa</h3></div>
+        <canvas id="preview"></canvas>
+      </section>
+    </aside>
+
+    <footer id="statusbar">
+      <span id="st-tool"></span>
+      <span id="st-pos"></span>
+      <span id="st-color"></span>
+      <span id="st-sel"></span>
+      <span class="grow"></span>
+      <span id="st-flags"></span>
+      <button id="st-size" title="Cambiar tamaño del lienzo"></button>
+      <button id="st-zoom" title="Ajustar a la ventana (0)"></button>
+      <span id="st-save" class="muted"></span>
+    </footer>
+  </div>
+
+  <div id="overlay"></div>
+  <div id="toast"></div>
+  <input type="file" id="file-input" class="offscreen">
+  <input type="color" id="color-input" class="offscreen">
+
+  <script src="js/util.js"></script>
+  <script src="js/doc.js"></script>
+  <script src="js/view.js"></script>
+  <script src="js/tools.js"></script>
+  <script src="js/commands.js"></script>
+  <script src="js/ui.js"></script>
+  <script src="js/main.js"></script>
+</body>
+</html>
