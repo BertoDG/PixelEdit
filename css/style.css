@@ -387,3 +387,15 @@ select { font: inherit; color: inherit; background: #14151a; border: 1px solid v
   .cv-left, .cv-stage { width: 100%; }
   .cv-stage { height: 220px; }
 }
+.cv-head { display: flex; align-items: baseline; gap: 10px; }
+.cv-styles { display: flex; gap: 8px; overflow-x: auto; padding: 2px 2px 8px; scrollbar-width: thin; }
+.cv-style {
+  flex: none; width: 92px; padding: 5px; display: flex; flex-direction: column; align-items: center; gap: 5px;
+  background: #14151a; font-size: 11px; line-height: 1.2; text-align: center;
+}
+.cv-style.on { border-color: var(--accent); box-shadow: 0 0 0 1px var(--accent); background: #1d2340; }
+.cv-thumb-box {
+  width: 80px; height: 64px; display: grid; place-items: center; border-radius: 5px; overflow: hidden;
+  background: repeating-conic-gradient(#c9c9d2 0 25%, #e9e9ef 0 50%) 0 0 / 8px 8px;
+}
+.cv-thumb { max-width: 80px; max-height: 64px; width: 80px; height: 64px; object-fit: contain; image-rendering: pixelated; }

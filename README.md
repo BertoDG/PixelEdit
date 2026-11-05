@@ -52,7 +52,15 @@ Los fps se cambian en la línea de tiempo. Haz doble clic en un fotograma para d
 ## Convertir una imagen a pixel art
 
 *Convertir imagen* (barra superior, `Ctrl+Alt+P` o el menú ☰ en el móvil). También aparece solo al
-abrir o arrastrar una imagen de más de 256 px. Ajustes con vista previa en directo:
+abrir o arrastrar una imagen de más de 256 px.
+
+Arriba hay una **galería de estilos**. Cada miniatura es tu propia imagen convertida en ese estilo:
+*Equilibrado, Sprite de juego, Icono mini, Escenario, Retro con trama, Portátil verde, 1 bit, Pastel,
+Colores vivos, Sepia y Noche*. Elige uno y, si quieres, retócalo con los ajustes (pasará a
+"Personalizado"). Se recuerda el último que usaste. Los estilos se definen en `CONVERT_STYLES`
+(`js/convert.js`), así que es fácil añadir los tuyos.
+
+Ajustes, con vista previa en directo:
 
 - **Ancho** del resultado (el alto mantiene la proporción) y **número de colores**.
 - **Paleta**: automática (elige los mejores colores) o **tu paleta actual**, útil para que todo un juego comparta colores.

@@ -546,7 +546,7 @@ const IDB = {
 };
 
 let prefsTimer = null, autosaveTimer = null;
-const PREF_KEYS = ['layout', 'brushSize', 'brushRound', 'pixelPerfect', 'fillShapes', 'grid', 'tileGrid', 'tileW', 'tileH',
+const PREF_KEYS = ['layout', 'convertOpts', 'convertStyle', 'brushSize', 'brushRound', 'pixelPerfect', 'fillShapes', 'grid', 'tileGrid', 'tileW', 'tileH',
   'panels', 'timeline', 'onion', 'stampSnap', 'exportScale', 'exportFormat', 'sheetCols', 'recentCmds'];
 const hex8 = c => u32ToHex(c) + cA(c).toString(16).padStart(2, '0');
 

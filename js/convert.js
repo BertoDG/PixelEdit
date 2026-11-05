@@ -251,8 +251,8 @@ function convertToPixelArt(src, o) {
   const px = downscale(src, tw, th, o.mode);
   adjust(px, o.saturation, o.contrast);
   if (o.removeBg) removeBackground(px, tw, th, o.bgTolerance);
-  const pal = o.palette === 'current'
-    ? S.palette.filter(c => cA(c)).map(c => [cR(c), cG(c), cB(c)])
+  const pal = o.palette === 'current' ? S.palette.filter(c => cA(c)).map(c => [cR(c), cG(c), cB(c)])
+    : o.palette === 'fixed' && o.fixed ? o.fixed.map(c => { const u = hexToU32(c); return [cR(u), cG(u), cB(u)]; })
     : kmeans(px, o.colors);
   const data = pal.length ? mapToPalette(px, tw, th, pal, o.dither) : new Uint32Array(tw * th);
   if (o.cleanup) cleanupStray(data, tw, th);
@@ -283,6 +283,37 @@ async function fileToImage(file) {
   try { return await loadImage(url); } finally { setTimeout(() => URL.revokeObjectURL(url), 1000); }
 }
 
+/* ---------------- Estilos predefinidos ---------------- */
+
+const CONVERT_STYLES = [
+  { id: 'balanced', name: 'Equilibrado', desc: 'Fiel a la imagen, 16 colores',
+    opts: { width: 64, colors: 16, mode: 'sharp', dither: 'none', saturation: 110, contrast: 105, cleanup: true } },
+  { id: 'sprite', name: 'Sprite de juego', desc: 'Pequeño, sin fondo, con contorno',
+    opts: { width: 32, colors: 8, mode: 'sharp', dither: 'none', saturation: 130, contrast: 115, removeBg: true, outline: true, cleanup: true } },
+  { id: 'icon', name: 'Icono mini', desc: '16 px, pocos colores muy vivos',
+    opts: { width: 16, colors: 6, mode: 'sharp', dither: 'none', saturation: 150, contrast: 120, removeBg: true, outline: true, cleanup: true } },
+  { id: 'scene', name: 'Escenario', desc: 'Grande, muchos colores, para fondos',
+    opts: { width: 128, colors: 32, mode: 'sharp', dither: 'none', saturation: 115, contrast: 108, cleanup: true } },
+  { id: 'retro8', name: 'Retro con trama', desc: '8 colores y patrón clásico',
+    opts: { width: 80, colors: 8, mode: 'smooth', dither: 'ordered', saturation: 120, contrast: 110, cleanup: false } },
+  { id: 'green', name: 'Portátil verde', desc: '4 tonos de verde, estilo consola clásica',
+    opts: { width: 64, palette: 'fixed', fixed: ['#1c2a1b', '#3f6b34', '#8db04c', '#d6e6a3'], mode: 'smooth', dither: 'ordered', saturation: 100, contrast: 115, cleanup: true } },
+  { id: 'onebit', name: '1 bit', desc: 'Blanco y negro con trama difusa',
+    opts: { width: 96, palette: 'fixed', fixed: ['#16141e', '#efe9d6'], mode: 'smooth', dither: 'fs', saturation: 100, contrast: 120, cleanup: false } },
+  { id: 'pastel', name: 'Pastel', desc: 'Suave y luminoso',
+    opts: { width: 48, colors: 12, mode: 'smooth', dither: 'none', saturation: 65, contrast: 85, cleanup: true } },
+  { id: 'vivid', name: 'Colores vivos', desc: 'Saturado y con mucho contraste',
+    opts: { width: 64, colors: 20, mode: 'sharp', dither: 'none', saturation: 170, contrast: 130, cleanup: true } },
+  { id: 'sepia', name: 'Sepia', desc: 'Foto antigua en marrones',
+    opts: { width: 72, palette: 'fixed', fixed: ['#2b1d14', '#5a3d26', '#8c6640', '#c09a68', '#ead7ad'], mode: 'smooth', dither: 'fs', saturation: 100, contrast: 110, cleanup: false } },
+  { id: 'night', name: 'Noche', desc: 'Azules fríos y luces cálidas',
+    opts: { width: 64, palette: 'fixed', fixed: ['#0b0d1f', '#1b2350', '#30448a', '#4f73c4', '#8fb6ec', '#f2d27a', '#fff4c9'], mode: 'sharp', dither: 'ordered', saturation: 100, contrast: 115, cleanup: true } },
+];
+
+function styleOptions(style) {
+  return { ...CONVERT_DEFAULTS, palette: 'auto', fixed: null, removeBg: false, outline: false, ...style.opts };
+}
+
 /**
  * @param img   HTMLImageElement
  * @param name  nombre base
@@ -290,8 +321,9 @@ async function fileToImage(file) {
  */
 function openConverter(img, name = 'imagen', allowRaw = false) {
   const src = sourceFromImage(img);
-  const o = { ...CONVERT_DEFAULTS, ...(S.convertOpts || {}) };
-  o.width = Math.min(o.width, src.w);
+  const small = sourceFromImage(img, 320); // para las miniaturas de estilos
+  let styleId = S.convertStyle || 'balanced';
+  let o = S.convertOpts ? { ...CONVERT_DEFAULTS, ...S.convertOpts } : styleOptions(CONVERT_STYLES[0]);
   let result = null, timer = 0;
 
   const preview = h('canvas', { class: 'cv-preview' });
@@ -304,30 +336,79 @@ function openConverter(img, name = 'imagen', allowRaw = false) {
     toggleOrig.classList.toggle('on', show);
   } }, 'Ver original');
 
-  const slider = (label, key, min, max, step = 1, fmt = v => v) => {
-    const val = h('span', { class: 'cv-val' }, fmt(o[key]));
-    const input = h('input', { type: 'range', min: String(min), max: String(max), step: String(step), value: String(o[key]) });
-    input.addEventListener('input', () => { o[key] = +input.value; val.textContent = fmt(o[key]); schedule(); });
-    return h('label', { class: 'cv-row' }, h('span', {}, label), input, val);
+  /* Galería de estilos: cada miniatura es la propia imagen convertida */
+  const gallery = h('div', { class: 'cv-styles' });
+  const cards = CONVERT_STYLES.map(st => {
+    const cv = h('canvas', { class: 'cv-thumb' });
+    const card = h('button', {
+      type: 'button', class: 'cv-style', title: st.desc,
+      onclick: () => { styleId = st.id; o = styleOptions(st); buildControls(); markActive(); render(); },
+    }, h('div', { class: 'cv-thumb-box' }, cv), h('span', {}, st.name));
+    card._canvas = cv; card._style = st;
+    gallery.append(card);
+    return card;
+  });
+  const markActive = () => cards.forEach(c => c.classList.toggle('on', c._style.id === styleId));
+  // Las miniaturas se calculan poco a poco para que el diálogo aparezca al instante
+  let qi = 0;
+  const nextThumb = () => {
+    if (qi >= cards.length || !document.body.contains(gallery)) return;
+    const card = cards[qi++], so = styleOptions(card._style);
+    so.width = Math.min(so.width, small.w);
+    const r = convertToPixelArt(small, so);
+    card._canvas.width = r.w; card._canvas.height = r.h;
+    card._canvas.getContext('2d').putImageData(new ImageData(new Uint8ClampedArray(r.data.buffer.slice(0)), r.w, r.h), 0, 0);
+    setTimeout(nextThumb, 0);
   };
-  const select = (label, key, options) => {
-    const sel = h('select', {}, options.map(([v, l]) => h('option', { value: v, selected: o[key] === v }, l)));
-    sel.addEventListener('change', () => { o[key] = sel.value; sync(); schedule(); });
-    return h('label', { class: 'cv-row' }, h('span', {}, label), sel);
-  };
-  const check = (label, key) => {
-    const cb = h('input', { type: 'checkbox', checked: !!o[key] });
-    cb.addEventListener('change', () => { o[key] = cb.checked; sync(); schedule(); });
-    return h('label', { class: 'check' }, cb, ' ' + label);
-  };
-  const sizePresets = h('div', { class: 'presets' }, [16, 24, 32, 48, 64, 96, 128].filter(n => n <= src.w).map(n =>
-    h('button', { type: 'button', onclick: () => { o.width = n; widthRow.querySelector('input').value = n; widthRow.querySelector('.cv-val').textContent = n + ' px'; schedule(); } }, String(n))));
-  const widthRow = slider('Ancho', 'width', 8, Math.min(256, src.w), 1, v => v + ' px');
-  const colorsRow = slider('Colores', 'colors', 2, 64, 1);
-  const tolRow = slider('Tolerancia', 'bgTolerance', 5, 120, 1);
-  const sync = () => {
-    colorsRow.style.display = o.palette === 'auto' ? '' : 'none';
-    tolRow.style.display = o.removeBg ? '' : 'none';
+
+  /* Controles finos (se reconstruyen al elegir un estilo) */
+  const controls = h('div', { class: 'cv-right' });
+  const customize = () => { if (styleId !== 'custom') { styleId = 'custom'; markActive(); } };
+  let sync = () => {};
+  const buildControls = () => {
+    const slider = (label, key, min, max, step = 1, fmt = v => v) => {
+      const val = h('span', { class: 'cv-val' }, fmt(o[key]));
+      const input = h('input', { type: 'range', min: String(min), max: String(max), step: String(step), value: String(o[key]) });
+      input.addEventListener('input', () => { o[key] = +input.value; val.textContent = fmt(o[key]); customize(); schedule(); });
+      return h('label', { class: 'cv-row' }, h('span', {}, label), input, val);
+    };
+    const select = (label, key, options) => {
+      const sel = h('select', {}, options.map(([v, l]) => h('option', { value: v, selected: o[key] === v }, l)));
+      sel.addEventListener('change', () => { o[key] = sel.value; customize(); sync(); schedule(); });
+      return h('label', { class: 'cv-row' }, h('span', {}, label), sel);
+    };
+    const check = (label, key) => {
+      const cb = h('input', { type: 'checkbox', checked: !!o[key] });
+      cb.addEventListener('change', () => { o[key] = cb.checked; customize(); sync(); schedule(); });
+      return h('label', { class: 'check' }, cb, ' ' + label);
+    };
+    o.width = Math.min(o.width, src.w);
+    const widthRow = slider('Ancho', 'width', 8, Math.min(256, src.w), 1, v => v + ' px');
+    const sizePresets = h('div', { class: 'presets' }, [16, 24, 32, 48, 64, 96, 128].filter(n => n <= src.w).map(n =>
+      h('button', { type: 'button', onclick: () => {
+        o.width = n; widthRow.querySelector('input').value = n; widthRow.querySelector('.cv-val').textContent = n + ' px';
+        customize(); schedule();
+      } }, String(n))));
+    const palOpts = [['auto', 'Automática'], ['current', 'Mi paleta actual']];
+    if (o.fixed) palOpts.push(['fixed', 'La del estilo']);
+    const colorsRow = slider('Colores', 'colors', 2, 64, 1);
+    const tolRow = slider('Tolerancia', 'bgTolerance', 5, 120, 1);
+    sync = () => {
+      colorsRow.style.display = o.palette === 'auto' ? '' : 'none';
+      tolRow.style.display = o.removeBg ? '' : 'none';
+    };
+    controls.replaceChildren(
+      widthRow, sizePresets,
+      select('Paleta', 'palette', palOpts),
+      colorsRow,
+      select('Reducción', 'mode', [['sharp', 'Nítida (color dominante)'], ['smooth', 'Suave (promedio)']]),
+      select('Tramado', 'dither', [['none', 'Ninguno'], ['ordered', 'Ordenado (patrón)'], ['fs', 'Difuso (Floyd–Steinberg)']]),
+      slider('Saturación', 'saturation', 0, 200, 5, v => v + '%'),
+      slider('Contraste', 'contrast', 50, 160, 5, v => v + '%'),
+      check('Quitar fondo', 'removeBg'), tolRow,
+      check('Limpiar píxeles sueltos', 'cleanup'),
+      check('Contorno oscuro', 'outline'));
+    sync();
   };
 
   const render = () => {
@@ -337,18 +418,19 @@ function openConverter(img, name = 'imagen', allowRaw = false) {
     preview.style.width = result.w * s + 'px'; preview.style.height = result.h * s + 'px';
     preview.getContext('2d').putImageData(new ImageData(new Uint8ClampedArray(result.data.buffer.slice(0)), result.w, result.h), 0, 0);
     original.style.width = preview.style.width;
-    info.textContent = `${result.w}×${result.h} px · ${result.colors.length} colores`;
+    const st = CONVERT_STYLES.find(x => x.id === styleId);
+    info.textContent = `${st ? st.name : 'Personalizado'} · ${result.w}×${result.h} px · ${result.colors.length} colores`;
   };
   const schedule = () => { clearTimeout(timer); timer = setTimeout(render, 60); };
 
   const finish = asLayer => {
     if (!result) render();
-    S.convertOpts = { ...o };
+    S.convertOpts = { ...o }; S.convertStyle = styleId;
     savePrefs();
     if (asLayer) addConvertedLayer(result, name);
     else {
       const doc = makeDoc(result.w, result.h, { layers: [new Layer(name || 'Imagen', [new Cel(result.w, result.h, result.data)])] });
-      if (o.palette === 'auto' && result.colors.length) S.palette = result.colors.slice();
+      if (o.palette !== 'current' && result.colors.length) S.palette = result.colors.slice();
       replaceDoc(doc, name);
     }
     toast('Imagen convertida a pixel art');
@@ -360,23 +442,17 @@ function openConverter(img, name = 'imagen', allowRaw = false) {
   buttons.push({ label: 'Crear dibujo', primary: true, run: () => finish(false) });
 
   openDialog('Convertir a pixel art', [
+    h('div', { class: 'cv-head' }, h('strong', {}, 'Estilo'), h('span', { class: 'muted' }, 'elige uno y ajusta a tu gusto')),
+    gallery,
     h('div', { class: 'cv' },
       h('div', { class: 'cv-left' }, h('div', { class: 'cv-stage' }, preview, original), info, toggleOrig),
-      h('div', { class: 'cv-right' },
-        widthRow, sizePresets,
-        select('Paleta', 'palette', [['auto', 'Automática'], ['current', 'Mi paleta actual']]),
-        colorsRow,
-        select('Reducción', 'mode', [['sharp', 'Nítida (color dominante)'], ['smooth', 'Suave (promedio)']]),
-        select('Tramado', 'dither', [['none', 'Ninguno'], ['ordered', 'Ordenado (patrón)'], ['fs', 'Difuso (Floyd–Steinberg)']]),
-        slider('Saturación', 'saturation', 0, 200, 5, v => v + '%'),
-        slider('Contraste', 'contrast', 50, 160, 5, v => v + '%'),
-        check('Quitar fondo', 'removeBg'), tolRow,
-        check('Limpiar píxeles sueltos', 'cleanup'),
-        check('Contorno oscuro', 'outline'))),
+      controls),
   ], buttons);
   $('#overlay .dialog').classList.add('wide');
-  sync();
+  buildControls();
+  markActive();
   render();
+  setTimeout(nextThumb, 30);
 }
 
 function openRawImage(img, name) {
