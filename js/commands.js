@@ -155,6 +155,7 @@ function registerCommands() {
   cmd('view.tileGrid', 'Vista', 'Cuadrícula de tiles', 'Ctrl+Shift+G', () => { S.tileGrid = !S.tileGrid; toast(`Cuadrícula de tiles ${S.tileW}×${S.tileH} ` + onOff(S.tileGrid)); savePrefs(); });
   cmd('view.tileSize', 'Vista', 'Tamaño de tile…', null, dlgTileSize);
   cmd('view.tile', 'Vista', 'Modo mosaico (ver repetición)', 'Shift+T', () => { S.tile = !S.tile; toast('Mosaico ' + onOff(S.tile)); });
+  cmd('view.layout', 'Vista', 'Vista: automática / móvil / escritorio', null, cycleLayout);
   cmd('view.panels', 'Vista', 'Mostrar / ocultar paneles', 'Tab', togglePanels);
 
   /* Archivo */

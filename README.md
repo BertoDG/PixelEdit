@@ -4,9 +4,23 @@ Editor de pixel art en el navegador para **animaciones y escenarios**, organizad
 pensado para trabajar rápido con el teclado en el escritorio y con el dedo en el iPhone.
 No necesita instalación ni compilación: abre `index.html` en Chrome, Edge, Firefox o Safari.
 
+## Publicarlo en Vercel
+
+Es un sitio estático: no necesita compilación.
+
+1. Entra en [vercel.com](https://vercel.com) con tu cuenta de GitHub → *Add New… → Project*.
+2. Importa el repositorio `PixelEdit`. Deja *Framework Preset* en **Other**, sin comando de build
+   y con el directorio raíz (`./`) como salida. Pulsa *Deploy*.
+3. Cada `git push` a `main` vuelve a publicar la web automáticamente.
+
+`vercel.json` evita que el navegador se quede con versiones antiguas del código.
+
+La web elige la interfaz según el dispositivo (tamaño de pantalla y si es táctil). Se puede forzar
+desde la paleta de comandos con *Vista: automática / móvil / escritorio*.
+
 ## Usarlo en el iPhone
 
-1. Publica el repositorio con GitHub Pages: en GitHub, *Settings → Pages → Build and deployment*,
+1. Publícalo en Vercel (arriba) o con GitHub Pages: en GitHub, *Settings → Pages → Build and deployment*,
    elige *Deploy from a branch*, rama `main`, carpeta `/ (root)`. La dirección será
    `https://<usuario>.github.io/PixelEdit/`.
 2. Abre esa dirección en Safari, pulsa *Compartir → Añadir a pantalla de inicio*.

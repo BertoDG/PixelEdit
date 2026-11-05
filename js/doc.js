@@ -101,6 +101,7 @@ const S = {
   modal: null,
   shapeInfo: '',
   mobile: false,
+  layout: 'auto',            // 'auto' | 'mobile' | 'desktop'
 };
 
 function activeLayer() { return S.doc.layers[S.doc.active]; }

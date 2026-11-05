@@ -547,7 +547,7 @@ const IDB = {
 };
 
 let prefsTimer = null, autosaveTimer = null;
-const PREF_KEYS = ['brushSize', 'brushRound', 'pixelPerfect', 'fillShapes', 'grid', 'tileGrid', 'tileW', 'tileH',
+const PREF_KEYS = ['layout', 'brushSize', 'brushRound', 'pixelPerfect', 'fillShapes', 'grid', 'tileGrid', 'tileW', 'tileH',
   'panels', 'timeline', 'onion', 'stampSnap', 'exportScale', 'exportFormat', 'sheetCols', 'recentCmds'];
 const hex8 = c => u32ToHex(c) + cA(c).toString(16).padStart(2, '0');
 
@@ -913,10 +913,17 @@ function initDrop() {
 
 /* ---------------- Diseño escritorio / móvil ---------------- */
 
+function cycleLayout() {
+  S.layout = S.layout === 'auto' ? 'mobile' : S.layout === 'mobile' ? 'desktop' : 'auto';
+  applyLayout();
+  fitView();
+  toast({ auto: 'Vista automática según el dispositivo', mobile: 'Vista móvil', desktop: 'Vista escritorio' }[S.layout]);
+  savePrefs();
+}
 const mobileQuery = matchMedia('(max-width: 760px), (max-height: 520px) and (pointer: coarse)');
 function applyLayout() {
   const app = $('#app');
-  S.mobile = mobileQuery.matches;
+  S.mobile = S.layout === 'mobile' ? true : S.layout === 'desktop' ? false : mobileQuery.matches;
   app.classList.toggle('mobile', S.mobile);
   app.classList.toggle('landscape', S.mobile && innerWidth > innerHeight);
   app.classList.toggle('focus', !S.mobile && !S.panels);

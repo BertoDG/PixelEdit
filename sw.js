@@ -1,6 +1,6 @@
 // Service worker: permite usar PixelEdit sin conexión una vez visitado.
 // Sube CACHE de versión cuando cambien los archivos.
-const CACHE = 'pixeledit-v2';
+const CACHE = 'pixeledit-v3';
 const FILES = [
   './', 'index.html', 'css/style.css', 'manifest.webmanifest',
   'js/util.js', 'js/doc.js', 'js/view.js', 'js/tools.js', 'js/gif.js', 'js/anim.js',
