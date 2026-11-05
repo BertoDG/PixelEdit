@@ -5,14 +5,17 @@
 
 const V = { zoom: 12, panX: 0, panY: 0, dpr: 1 };
 const ZOOMS = [1, 2, 3, 4, 5, 6, 8, 10, 12, 16, 20, 24, 32, 40, 48, 64, 80, 96, 128];
-let viewCanvas, viewCtx, compCanvas, compCtx, checkerPattern, previewCanvas, previewCtx;
+let viewCanvas, viewCtx, compCanvas, compCtx, onionCanvas, onionCtx, checkerPattern, previewCanvas, previewCtx;
 let renderQueued = false;
+let stampCanvas = null, stampCanvasFor = null;
 
 function initView() {
   viewCanvas = $('#view');
   viewCtx = viewCanvas.getContext('2d');
   compCanvas = document.createElement('canvas');
   compCtx = compCanvas.getContext('2d', { willReadFrequently: true });
+  onionCanvas = document.createElement('canvas');
+  onionCtx = onionCanvas.getContext('2d');
   previewCanvas = $('#preview');
   previewCtx = previewCanvas.getContext('2d');
   new ResizeObserver(resizeView).observe($('#viewport'));
@@ -21,14 +24,13 @@ function initView() {
 
 function resizeView() {
   const r = $('#viewport').getBoundingClientRect();
-  const first = !viewCanvas.width || viewCanvas.width === 300;
   V.dpr = window.devicePixelRatio || 1;
   viewCanvas.width = Math.max(1, Math.round(r.width * V.dpr));
   viewCanvas.height = Math.max(1, Math.round(r.height * V.dpr));
   viewCanvas.style.width = r.width + 'px';
   viewCanvas.style.height = r.height + 'px';
   makeChecker();
-  if (first && S.doc) fitView();
+  if (S.doc && !V.fitted) fitView();
   requestRender();
 }
 
@@ -57,7 +59,7 @@ function screenToDoc(clientX, clientY) {
 function zoomTo(z, cx, cy) {
   const r = viewCanvas.getBoundingClientRect();
   if (cx == null) { cx = r.width / 2; cy = r.height / 2; }
-  z = clamp(z, 0.1, 160);
+  z = clamp(z, 0.05, 200);
   const dx = (cx - V.panX) / V.zoom, dy = (cy - V.panY) / V.zoom;
   V.zoom = z;
   V.panX = Math.round(cx - dx * z);
@@ -74,29 +76,49 @@ function fitView() {
   if (!S.doc || !viewCanvas) return;
   const r = $('#viewport').getBoundingClientRect();
   if (!r.width || !r.height) return;
-  const fit = Math.min(r.width * 0.86 / S.doc.w, r.height * 0.86 / S.doc.h);
+  V.fitted = true;
+  const fit = Math.min(r.width * 0.9 / S.doc.w, r.height * 0.9 / S.doc.h);
   const z = fit >= 1 ? (ZOOMS.filter(v => v <= fit).pop() || 1) : fit;
   V.zoom = z;
   V.panX = Math.round((r.width - S.doc.w * z) / 2);
   V.panY = Math.round((r.height - S.doc.h * z) / 2);
   requestRender(); updateStatus();
 }
+/** Centra la vista en un punto del documento. */
+function centerOn(x, y) {
+  const r = $('#viewport').getBoundingClientRect();
+  V.panX = Math.round(r.width / 2 - x * V.zoom);
+  V.panY = Math.round(r.height / 2 - y * V.zoom);
+  requestRender();
+}
 
 function composite() {
   const d = S.doc;
   if (compCanvas.width !== d.w || compCanvas.height !== d.h) { compCanvas.width = d.w; compCanvas.height = d.h; }
   compCtx.clearRect(0, 0, d.w, d.h);
-  d.layers.forEach((l, i) => {
-    if (!l.visible) return;
-    l.sync();
-    compCtx.globalAlpha = l.opacity;
-    compCtx.drawImage(l.canvas, 0, 0);
-    if (i === d.active && S.float) {
-      syncFloatCanvas();
-      compCtx.drawImage(S.floatCanvas, S.float.x, S.float.y);
-    }
-  });
-  compCtx.globalAlpha = 1;
+  drawFrame(compCtx, d.frame, true);
+}
+
+function drawOnion(ctx, x, y, dw, dh) {
+  const d = S.doc;
+  if (!S.onion || S.playing || d.frames.length < 2) return;
+  if (onionCanvas.width !== d.w || onionCanvas.height !== d.h) { onionCanvas.width = d.w; onionCanvas.height = d.h; }
+  const list = [[d.frame - 1, 'rgba(255,70,90,1)'], [d.frame + 1, 'rgba(60,150,255,1)']];
+  for (const [f, tint] of list) {
+    if (f < 0 || f >= d.frames.length) continue;
+    onionCtx.globalCompositeOperation = 'source-over';
+    onionCtx.clearRect(0, 0, d.w, d.h);
+    drawFrame(onionCtx, f, false);
+    onionCtx.globalCompositeOperation = 'source-atop';
+    onionCtx.globalAlpha = 0.45;
+    onionCtx.fillStyle = tint;
+    onionCtx.fillRect(0, 0, d.w, d.h);
+    onionCtx.globalAlpha = 1;
+    onionCtx.globalCompositeOperation = 'source-over';
+    ctx.globalAlpha = 0.4;
+    ctx.drawImage(onionCanvas, x, y, dw, dh);
+    ctx.globalAlpha = 1;
+  }
 }
 
 function render() {
@@ -118,27 +140,26 @@ function render() {
     ctx.save(); ctx.translate(x, y);
     ctx.fillStyle = checkerPattern; ctx.fillRect(0, 0, dw, dh);
     ctx.restore();
+    if (!tx && !ty) drawOnion(ctx, x, y, dw, dh);
     ctx.drawImage(compCanvas, x, y, dw, dh);
     if (tx || ty) { ctx.fillStyle = 'rgba(22,23,29,0.35)'; ctx.fillRect(x, y, dw, dh); }
   }
 
-  // Cuadrícula
-  if (S.grid && V.zoom >= 6) {
-    ctx.lineWidth = 1;
+  // Solo dibujamos las líneas visibles (importante en escenarios grandes)
+  const vx0 = Math.max(0, Math.floor(-ox / z)), vy0 = Math.max(0, Math.floor(-oy / z));
+  const vx1 = Math.min(d.w, Math.ceil((W - ox) / z)), vy1 = Math.min(d.h, Math.ceil((H - oy) / z));
+  const gridLines = (stepX, stepY, style) => {
     ctx.beginPath();
-    for (let i = 1; i < d.w; i++) { const X = Math.round(ox + i * z) + 0.5; ctx.moveTo(X, oy); ctx.lineTo(X, oy + dh); }
-    for (let j = 1; j < d.h; j++) { const Y = Math.round(oy + j * z) + 0.5; ctx.moveTo(ox, Y); ctx.lineTo(ox + dw, Y); }
-    ctx.strokeStyle = 'rgba(40,40,60,0.16)';
-    ctx.stroke();
-  }
-  if (S.gridMajor > 0 && V.zoom >= 2) {
-    const m = S.gridMajor;
-    ctx.beginPath();
-    for (let i = m; i < d.w; i += m) { const X = Math.round(ox + i * z) + 0.5; ctx.moveTo(X, oy); ctx.lineTo(X, oy + dh); }
-    for (let j = m; j < d.h; j += m) { const Y = Math.round(oy + j * z) + 0.5; ctx.moveTo(ox, Y); ctx.lineTo(ox + dw, Y); }
-    ctx.strokeStyle = 'rgba(70,90,200,0.45)';
-    ctx.stroke();
-  }
+    for (let i = Math.max(stepX, Math.ceil(vx0 / stepX) * stepX); i < vx1; i += stepX) {
+      const X = Math.round(ox + i * z) + 0.5; ctx.moveTo(X, Math.max(0, oy)); ctx.lineTo(X, Math.min(H, oy + dh));
+    }
+    for (let j = Math.max(stepY, Math.ceil(vy0 / stepY) * stepY); j < vy1; j += stepY) {
+      const Y = Math.round(oy + j * z) + 0.5; ctx.moveTo(Math.max(0, ox), Y); ctx.lineTo(Math.min(W, ox + dw), Y);
+    }
+    ctx.strokeStyle = style; ctx.lineWidth = 1; ctx.stroke();
+  };
+  if (S.grid && V.zoom >= 6) gridLines(1, 1, 'rgba(40,40,60,0.16)');
+  if (S.tileGrid && S.tileW * V.zoom >= 4) gridLines(S.tileW, S.tileH, 'rgba(70,90,220,0.55)');
   ctx.strokeStyle = 'rgba(255,255,255,0.22)';
   ctx.strokeRect(ox - 0.5, oy - 0.5, dw + 1, dh + 1);
 
@@ -161,7 +182,7 @@ function render() {
     const x = Math.round(ox + r.x * z) + 0.5, y = Math.round(oy + r.y * z) + 0.5;
     const w = Math.round(r.w * z) - 1, hh = Math.round(r.h * z) - 1;
     ctx.save();
-    ctx.lineWidth = 1;
+    ctx.lineWidth = Math.max(1, Math.round(dpr));
     ctx.setLineDash([4 * dpr, 4 * dpr]);
     ctx.strokeStyle = '#fff'; ctx.strokeRect(x, y, w, hh);
     ctx.lineDashOffset = 4 * dpr;
@@ -175,9 +196,20 @@ function render() {
 
 function drawCursor(ctx, ox, oy, z) {
   const p = S.hover;
-  if (!p || dragState?.tool === 'pan') return;
+  if (!p || dragState?.tool === 'pan' || S.playing) return;
   const tool = Tools[currentToolId()];
   if (!tool) return;
+  if (tool.id === 'stamp') {
+    if (!S.stamp) return;
+    if (stampCanvasFor !== S.stamp) { stampCanvas = u32ToCanvas(S.stamp.data, S.stamp.w, S.stamp.h); stampCanvasFor = S.stamp; }
+    const o = stampOrigin(p);
+    ctx.globalAlpha = 0.6;
+    ctx.drawImage(stampCanvas, Math.round(ox + o.x * z), Math.round(oy + o.y * z), Math.round(S.stamp.w * z), Math.round(S.stamp.h * z));
+    ctx.globalAlpha = 1;
+    ctx.strokeStyle = 'rgba(108,140,255,0.9)';
+    ctx.strokeRect(Math.round(ox + o.x * z) + 0.5, Math.round(oy + o.y * z) + 0.5, Math.round(S.stamp.w * z) - 1, Math.round(S.stamp.h * z) - 1);
+    return;
+  }
   const cells = [];
   if (tool.brush) {
     for (const [dx, dy] of brushOffsets(S.brushSize, S.brushRound)) {
@@ -196,22 +228,21 @@ function drawCursor(ctx, ox, oy, z) {
   for (const [x, y] of cells) {
     ctx.fillRect(Math.round(ox + x * z), Math.round(oy + y * z), Math.ceil(z), Math.ceil(z));
   }
-  // contorno del píxel central
   ctx.lineWidth = 1;
   ctx.strokeStyle = 'rgba(0,0,0,0.6)';
   ctx.strokeRect(Math.round(ox + p.x * z) + 0.5, Math.round(oy + p.y * z) + 0.5, Math.ceil(z) - 1, Math.ceil(z) - 1);
   ctx.restore();
 }
 
+let previewGeom = null;
 function renderPreview() {
-  if (!S.panels) return;
+  if (!previewCanvas.offsetParent) return; // panel oculto
   const d = S.doc;
   const cw = previewCanvas.clientWidth || 228, ch = 120;
   const dpr = V.dpr;
   if (previewCanvas.width !== Math.round(cw * dpr)) {
     previewCanvas.width = Math.round(cw * dpr);
     previewCanvas.height = Math.round(ch * dpr);
-    previewCanvas.style.height = ch + 'px';
   }
   const ctx = previewCtx, W = previewCanvas.width, H = previewCanvas.height;
   ctx.setTransform(1, 0, 0, 1, 0, 0);
@@ -221,6 +252,26 @@ function renderPreview() {
   if (s >= 1) s = Math.floor(s);
   const w = Math.round(d.w * s), hh = Math.round(d.h * s);
   const x = Math.round((W - w) / 2), y = Math.round((H - hh) / 2);
+  previewGeom = { x: x / dpr, y: y / dpr, s: s / dpr };
   ctx.save(); ctx.translate(x, y); ctx.fillStyle = checkerPattern; ctx.fillRect(0, 0, w, hh); ctx.restore();
   ctx.drawImage(compCanvas, x, y, w, hh);
+  // Rectángulo de la zona visible
+  const r = $('#viewport').getBoundingClientRect();
+  const vx = -V.panX / V.zoom, vy = -V.panY / V.zoom, vw = r.width / V.zoom, vh = r.height / V.zoom;
+  if (vx > 0 || vy > 0 || vw < d.w || vh < d.h) {
+    ctx.strokeStyle = '#6c8cff';
+    ctx.lineWidth = Math.max(1, dpr);
+    ctx.strokeRect(x + vx * s, y + vy * s, vw * s, vh * s);
+  }
+}
+
+/** Clic/arrastre en la vista previa: navega por el escenario. */
+function initPreviewNav() {
+  const go = e => {
+    if (!previewGeom) return;
+    const r = previewCanvas.getBoundingClientRect();
+    centerOn((e.clientX - r.left - previewGeom.x) / previewGeom.s, (e.clientY - r.top - previewGeom.y) / previewGeom.s);
+  };
+  previewCanvas.addEventListener('pointerdown', e => { previewCanvas.setPointerCapture(e.pointerId); go(e); });
+  previewCanvas.addEventListener('pointermove', e => { if (e.buttons) go(e); });
 }

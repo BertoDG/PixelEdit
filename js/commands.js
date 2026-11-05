@@ -44,6 +44,8 @@ function comboFromEvent(e) {
     if (e.getModifierState?.('AltGraph') || (ctrl && alt)) { ctrl = false; alt = false; }
   }
   if (isLetter) key = key.toUpperCase();
+  // Con Ctrl/Alt usamos la tecla física (en Mac, Option+letra produce otros caracteres)
+  if ((ctrl || alt) && /^Key[A-Z]$/.test(e.code)) key = e.code.slice(3);
   return (ctrl ? 'Ctrl+' : '') + (alt ? 'Alt+' : '') + (shift ? 'Shift+' : '') + key;
 }
 
@@ -74,11 +76,15 @@ function registerCommands() {
   /* Selección */
   cmd('sel.all', 'Selección', 'Seleccionar todo', 'Ctrl+A', () => { commitFloat(); S.sel = { x: 0, y: 0, w: S.doc.w, h: S.doc.h }; });
   cmd('sel.none', 'Selección', 'Quitar selección', ['Ctrl+D', 'Escape'], deselect);
-  cmd('sel.commit', 'Selección', 'Fijar píxeles flotantes', 'Enter', () => { commitFloat(); });
-  cmd('sel.up', 'Selección', 'Mover 1px arriba', 'ArrowUp', () => nudge(0, -1), { hidden: true });
-  cmd('sel.down', 'Selección', 'Mover 1px abajo', 'ArrowDown', () => nudge(0, 1), { hidden: true });
-  cmd('sel.left', 'Selección', 'Mover 1px izquierda', 'ArrowLeft', () => nudge(-1, 0), { hidden: true });
-  cmd('sel.right', 'Selección', 'Mover 1px derecha', 'ArrowRight', () => nudge(1, 0), { hidden: true });
+  cmd('nav.up', 'Selección', 'Mover selección 1px ↑ · sin selección: capa superior', 'ArrowUp', () => (hasSel() ? nudge(0, -1) : selectLayer(S.doc.active + 1)));
+  cmd('nav.down', 'Selección', 'Mover selección 1px ↓ · sin selección: capa inferior', 'ArrowDown', () => (hasSel() ? nudge(0, 1) : selectLayer(S.doc.active - 1)));
+  cmd('nav.left', 'Selección', 'Mover selección 1px ← · sin selección: fotograma anterior', 'ArrowLeft', () => (hasSel() ? nudge(-1, 0) : goFrame(S.doc.frame - 1)));
+  cmd('nav.right', 'Selección', 'Mover selección 1px → · sin selección: fotograma siguiente', 'ArrowRight', () => (hasSel() ? nudge(1, 0) : goFrame(S.doc.frame + 1)));
+  cmd('nudge.up', 'Selección', 'Mover capa/selección 1px ↑', 'Shift+ArrowUp', () => nudge(0, -1), { hidden: true });
+  cmd('nudge.down', 'Selección', 'Mover capa/selección 1px ↓', 'Shift+ArrowDown', () => nudge(0, 1), { hidden: true });
+  cmd('nudge.left', 'Selección', 'Mover capa/selección 1px ←', 'Shift+ArrowLeft', () => nudge(-1, 0), { hidden: true });
+  cmd('nudge.right', 'Selección', 'Mover capa/selección 1px →', 'Shift+ArrowRight', () => nudge(1, 0), { hidden: true });
+  cmd('sel.toStamp', 'Selección', 'Usar selección como sello', 'Ctrl+B', stampFromSelection);
   cmd('sel.cropTo', 'Selección', 'Recortar lienzo a la selección', null, cropToSelection);
 
   /* Pincel y modos */
@@ -112,10 +118,28 @@ function registerCommands() {
   cmd('layer.down', 'Capas', 'Seleccionar capa inferior', 'PageDown', () => selectLayer(S.doc.active - 1));
   cmd('layer.moveUp', 'Capas', 'Subir capa', 'Shift+PageUp', () => moveLayer(1));
   cmd('layer.moveDown', 'Capas', 'Bajar capa', 'Shift+PageDown', () => moveLayer(-1));
+  cmd('layer.lock', 'Capas', 'Bloquear / desbloquear capa', 'Alt+L', () => { const l = activeLayer(); l.locked = !l.locked; toast(l.locked ? 'Capa bloqueada' : 'Capa desbloqueada'); markModified(); });
   cmd('layer.toggle', 'Capas', 'Mostrar / ocultar capa activa', 'Shift+L', () => { const l = activeLayer(); l.visible = !l.visible; markModified(); });
   cmd('layer.clear', 'Capas', 'Vaciar capa activa', null, () => { commitFloat(); const ed = beginEdit(); ed.layer.data.fill(0); ed.layer.dirty = true; endEdit(); });
 
   /* Lienzo */
+  cmd('stamp.snap', 'Pincel', 'Sello: ajustar a la cuadrícula de tiles', 'Shift+S', () => { S.stampSnap = !S.stampSnap; toast('Ajustar sello a tiles ' + onOff(S.stampSnap)); savePrefs(); });
+
+  /* Animación */
+  cmd('anim.play', 'Animación', 'Reproducir / pausar (Intro fija la selección si la hay)', 'Enter', () => (S.float ? commitFloat() : togglePlayback()));
+  cmd('frame.prev', 'Animación', 'Fotograma anterior', 'Alt+,', () => { stopPlayback(); goFrame(S.doc.frame - 1); });
+  cmd('frame.next', 'Animación', 'Fotograma siguiente', 'Alt+.', () => { stopPlayback(); goFrame(S.doc.frame + 1); });
+  cmd('frame.first', 'Animación', 'Primer fotograma', 'Home', () => { stopPlayback(); goFrame(0); });
+  cmd('frame.last', 'Animación', 'Último fotograma', 'End', () => { stopPlayback(); goFrame(S.doc.frames.length - 1); });
+  cmd('frame.new', 'Animación', 'Nuevo fotograma vacío', 'Alt+N', () => addFrame(false));
+  cmd('frame.dup', 'Animación', 'Duplicar fotograma', 'Alt+D', () => addFrame(true));
+  cmd('frame.del', 'Animación', 'Eliminar fotograma', ['Alt+Backspace', 'Alt+Delete'], deleteFrame);
+  cmd('frame.moveLeft', 'Animación', 'Mover fotograma a la izquierda', 'Alt+ArrowLeft', () => moveFrame(-1));
+  cmd('frame.moveRight', 'Animación', 'Mover fotograma a la derecha', 'Alt+ArrowRight', () => moveFrame(1));
+  cmd('frame.duration', 'Animación', 'Duración del fotograma / velocidad…', null, dlgFrameDuration);
+  cmd('anim.onion', 'Animación', 'Papel cebolla', 'Shift+O', () => { S.onion = !S.onion; toast('Papel cebolla ' + onOff(S.onion)); savePrefs(); });
+  cmd('view.timeline', 'Animación', 'Mostrar / ocultar línea de tiempo', 'Alt+T', toggleTimeline);
+
   cmd('canvas.resize', 'Lienzo', 'Tamaño del lienzo…', 'Ctrl+Alt+C', dlgResize);
   cmd('canvas.scale', 'Lienzo', 'Escalar imagen…', 'Ctrl+Alt+I', dlgScale);
   cmd('canvas.crop', 'Lienzo', 'Recortar al contenido', null, cropToContent);
@@ -128,10 +152,8 @@ function registerCommands() {
   cmd('view.zoomOut', 'Vista', 'Alejar', '-', () => zoomStep(-1));
   cmd('view.fit', 'Vista', 'Ajustar a la ventana', '0', fitView);
   cmd('view.grid', 'Vista', 'Cuadrícula de píxeles', 'Shift+G', () => { S.grid = !S.grid; toast('Cuadrícula ' + onOff(S.grid)); savePrefs(); });
-  cmd('view.gridMajor', 'Vista', 'Cuadrícula de bloques (8 / 16 / no)', 'Ctrl+Shift+G', () => {
-    S.gridMajor = S.gridMajor === 0 ? 8 : S.gridMajor === 8 ? 16 : 0;
-    toast(S.gridMajor ? `Bloques de ${S.gridMajor}px` : 'Bloques desactivados'); savePrefs();
-  });
+  cmd('view.tileGrid', 'Vista', 'Cuadrícula de tiles', 'Ctrl+Shift+G', () => { S.tileGrid = !S.tileGrid; toast(`Cuadrícula de tiles ${S.tileW}×${S.tileH} ` + onOff(S.tileGrid)); savePrefs(); });
+  cmd('view.tileSize', 'Vista', 'Tamaño de tile…', null, dlgTileSize);
   cmd('view.tile', 'Vista', 'Modo mosaico (ver repetición)', 'Shift+T', () => { S.tile = !S.tile; toast('Mosaico ' + onOff(S.tile)); });
   cmd('view.panels', 'Vista', 'Mostrar / ocultar paneles', 'Tab', togglePanels);
 
@@ -139,8 +161,10 @@ function registerCommands() {
   cmd('file.new', 'Archivo', 'Nuevo lienzo…', 'Ctrl+Alt+N', dlgNew);
   cmd('file.open', 'Archivo', 'Abrir (proyecto o imagen)…', 'Ctrl+O', () => openFileDialog('open'));
   cmd('file.save', 'Archivo', 'Guardar proyecto', 'Ctrl+S', saveProject);
-  cmd('file.export', 'Archivo', 'Exportar PNG…', 'Ctrl+Shift+E', dlgExport);
-  cmd('file.quickExport', 'Archivo', 'Exportar PNG rápido (última escala)', 'Ctrl+E', () => exportPNG(S.exportScale || 1));
+  cmd('file.export', 'Archivo', 'Exportar (PNG, GIF, hoja de sprites)…', 'Ctrl+Shift+E', dlgExport);
+  cmd('file.quickExport', 'Archivo', 'Repetir última exportación', 'Ctrl+E', quickExport);
+  cmd('file.exportGif', 'Archivo', 'Exportar GIF animado', null, () => exportGIF(S.exportScale || 1));
+  cmd('file.exportSheet', 'Archivo', 'Exportar hoja de sprites', null, () => exportSpritesheet(S.exportScale || 1, S.sheetCols));
 
   /* Ayuda */
   cmd('ui.palette', 'Ayuda', 'Paleta de comandos', ['Ctrl+K', '/'], openCommandPalette);
@@ -149,4 +173,5 @@ function registerCommands() {
   buildKeymap();
 }
 
+const hasSel = () => !!(S.sel || S.float);
 const onOff = v => (v ? 'activado' : 'desactivado');

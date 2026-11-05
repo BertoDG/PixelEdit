@@ -1,9 +1,9 @@
 'use strict';
 /* =========================================================================
- * Aplicación: operaciones, entrada (ratón/teclado) y persistencia.
+ * Aplicación: operaciones, entrada (ratón / teclado / táctil) y persistencia.
  * ========================================================================= */
 
-let dragState = null;        // { tool, btn } mientras se arrastra en el lienzo
+let dragState = null;        // trazo en curso en el lienzo
 let heldToolKey = null;      // tecla de herramienta mantenida (cambio temporal)
 
 function currentToolId() { return dragState?.tool || S.tempTool || S.tool; }
@@ -21,12 +21,9 @@ function setBrush(n) {
 
 /* ---------------- Documento ---------------- */
 
-function makeDoc(w, h, layers) {
-  return { w, h, layers: layers || [new Layer(w, h, 'Capa 1')], active: 0 };
-}
-
 function newDoc(w, h) {
   w = clamp(Math.round(w) || 32, 1, 2048); h = clamp(Math.round(h) || 32, 1, 2048);
+  stopPlayback();
   commitFloat();
   doSnap(() => { S.doc = makeDoc(w, h); S.sel = null; S.float = null; });
   S.fileName = 'sin-titulo';
@@ -39,20 +36,20 @@ function resizeCanvas(w, h, anchor = [1, 1]) {
   if (w === d.w && h === d.h) return;
   commitFloat();
   const ox = Math.round((w - d.w) * anchor[0] / 2), oy = Math.round((h - d.h) * anchor[1] / 2);
+  const ow = d.w, oh = d.h;
   doSnap(() => {
-    const layers = d.layers.map(l => {
+    remapCels(w, h, src => {
       const out = new Uint32Array(w * h);
-      for (let y = 0; y < d.h; y++) {
+      for (let y = 0; y < oh; y++) {
         const ny = y + oy;
         if (ny < 0 || ny >= h) continue;
-        for (let x = 0; x < d.w; x++) {
+        for (let x = 0; x < ow; x++) {
           const nx = x + ox;
-          if (nx >= 0 && nx < w) out[ny * w + nx] = l.data[y * d.w + x];
+          if (nx >= 0 && nx < w) out[ny * w + nx] = src[y * ow + x];
         }
       }
-      return cloneLayer(l, w, h, out);
+      return out;
     });
-    S.doc = { w, h, layers, active: d.active };
     S.sel = null;
   });
   fitView();
@@ -60,35 +57,28 @@ function resizeCanvas(w, h, anchor = [1, 1]) {
 
 function scaleImage(w, h) {
   w = clamp(Math.round(w) || 1, 1, 2048); h = clamp(Math.round(h) || 1, 1, 2048);
-  const d = S.doc;
+  const ow = S.doc.w, oh = S.doc.h;
   commitFloat();
   doSnap(() => {
-    const layers = d.layers.map(l => {
+    remapCels(w, h, src => {
       const out = new Uint32Array(w * h);
       for (let y = 0; y < h; y++) {
-        const sy = Math.min(d.h - 1, Math.floor(y * d.h / h));
-        for (let x = 0; x < w; x++) out[y * w + x] = l.data[sy * d.w + Math.min(d.w - 1, Math.floor(x * d.w / w))];
+        const sy = Math.min(oh - 1, Math.floor(y * oh / h));
+        for (let x = 0; x < w; x++) out[y * w + x] = src[sy * ow + Math.min(ow - 1, Math.floor(x * ow / w))];
       }
-      return cloneLayer(l, w, h, out);
+      return out;
     });
-    S.doc = { w, h, layers, active: d.active };
     S.sel = null;
   });
   fitView();
 }
 
-function cloneLayer(l, w, h, data) {
-  const n = new Layer(w, h, l.name, data);
-  n.id = l.id; n.visible = l.visible; n.opacity = l.opacity;
-  return n;
-}
-
 function contentBounds() {
   const d = S.doc;
   let x0 = d.w, y0 = d.h, x1 = -1, y1 = -1;
-  for (const l of d.layers) {
+  for (const l of d.layers) for (const c of l.cels) {
     for (let y = 0; y < d.h; y++) for (let x = 0; x < d.w; x++) {
-      if (cA(l.data[y * d.w + x])) {
+      if (cA(c.data[y * d.w + x])) {
         if (x < x0) x0 = x; if (x > x1) x1 = x;
         if (y < y0) y0 = y; if (y > y1) y1 = y;
       }
@@ -98,12 +88,7 @@ function contentBounds() {
 }
 
 function cropTo(r) {
-  const d = S.doc;
-  doSnap(() => {
-    const layers = d.layers.map(l => cloneLayer(l, r.w, r.h, extract(l, r)));
-    S.doc = { w: r.w, h: r.h, layers, active: d.active };
-    S.sel = null;
-  });
+  doSnap(() => { remapCels(r.w, r.h, (_, c) => extract(c, r)); S.sel = null; });
   fitView();
 }
 function cropToContent() {
@@ -121,21 +106,18 @@ function cropToSelection() {
 
 function transformCanvas(kind) {
   commitFloat();
-  const d = S.doc;
+  const d = S.doc, ow = d.w, oh = d.h, rot = kind === 'rotate';
   doSnap(() => {
-    const rot = kind === 'rotate';
-    const w = rot ? d.h : d.w, h = rot ? d.w : d.h;
-    const layers = d.layers.map(l => cloneLayer(l, w, h,
-      rot ? rotateData(l.data, d.w, d.h) : flipData(l.data, d.w, d.h, kind === 'flipH')));
-    S.doc = { w, h, layers, active: d.active };
+    remapCels(rot ? oh : ow, rot ? ow : oh, src => (rot ? rotateData(src, ow, oh) : flipData(src, ow, oh, kind === 'flipH')));
     S.sel = null;
   });
-  if (kind === 'rotate') fitView();
+  if (rot) fitView();
 }
 
 /* ---------------- Selección / portapapeles ---------------- */
 
 function deselect() {
+  stopPlayback();
   if (S.float) commitFloat();
   S.sel = null;
 }
@@ -144,7 +126,7 @@ function selectionPixels() {
   if (S.float) return { ...S.float, data: S.float.data.slice() };
   const r = S.sel ? clipRect(S.sel) : { x: 0, y: 0, w: S.doc.w, h: S.doc.h };
   if (!r) return null;
-  return { ...r, data: extract(activeLayer(), r) };
+  return { ...r, data: extract(activeCel(), r) };
 }
 
 function copySel() {
@@ -161,30 +143,30 @@ function copySel() {
   } catch (_) { /* el portapapeles del sistema es opcional */ }
 }
 
-function cutSel() {
-  copySel();
-  deleteSel();
-}
+function cutSel() { copySel(); deleteSel(); }
 
 function deleteSel() {
-  if (S.float) { doSnap(() => { S.float = null; }); return; }
+  if (S.float) { doCelSnap(() => { S.float = null; }); return; }
   if (S.sel) {
     const r = clipRect(S.sel);
     if (!r) return;
     const ed = beginEdit();
-    clearRegion(ed.layer, r);
+    if (!ed) return;
+    clearRegion(ed.cel, r);
     endEdit();
     return;
   }
   const ed = beginEdit();
-  ed.layer.data.fill(0); ed.layer.dirty = true;
+  if (!ed) return;
+  ed.cel.data.fill(0); ed.cel.dirty = true;
   endEdit();
-  toast('Capa vaciada');
+  toast('Capa vaciada en este fotograma');
 }
 
 function pasteBlock(c) {
   commitFloat();
-  doSnap(() => {
+  if (!editable()) return;
+  doCelSnap(() => {
     let { x, y } = c;
     if (x == null || x + c.w > S.doc.w || y + c.h > S.doc.h || x < 0 || y < 0) {
       // centra en la vista si no cabe en su posición original
@@ -198,7 +180,7 @@ function pasteBlock(c) {
     S.floatDirty = true;
   });
   setTool('move');
-  toast('Pegado · arrastra para colocar · Intro para fijar');
+  toast(S.mobile ? 'Pegado · arrastra para colocar · "Fijar" para terminar' : 'Pegado · arrastra para colocar · Intro para fijar');
 }
 
 async function pasteFromCommand() {
@@ -220,34 +202,40 @@ async function pasteImageBlob(blob) {
   try {
     const img = await loadImage(url);
     const { w, h, data } = imageToU32(img);
-    if (S.clipboard && S.clipboard.w === w && S.clipboard.h === h && S.clipboard.data.every((v, i) => sameColor(v, data[i]))) {
-      pasteBlock(S.clipboard); // es nuestra propia copia: conserva la posición
-    } else pasteBlock({ w, h, data });
+    const cb = S.clipboard;
+    if (cb && cb.w === w && cb.h === h && cb.data.every((v, i) => sameColor(v, data[i]))) pasteBlock(cb);
+    else pasteBlock({ w, h, data });
   } finally { URL.revokeObjectURL(url); }
 }
 
 function nudge(dx, dy) {
   if (S.sel || S.float) {
-    doSnap(() => {
+    doCelSnap(() => {
       if (!liftSel()) return false;
       S.float.x += dx; S.float.y += dy;
       S.sel.x = S.float.x; S.sel.y = S.float.y;
     });
   } else {
     const ed = beginEdit();
-    shiftLayer(ed.layer, ed.before, dx, dy);
+    if (!ed) return;
+    shiftCel(ed.cel, ed.before, dx, dy);
     endEdit();
   }
 }
 
 function flipSel(horiz) {
+  if (S.tool === 'stamp' && S.stamp && !S.sel) {
+    S.stamp = { ...S.stamp, data: flipData(S.stamp.data, S.stamp.w, S.stamp.h, horiz) };
+    return toast('Sello volteado');
+  }
   if (!S.sel && !S.float) {
     const ed = beginEdit();
-    ed.layer.setData(flipData(ed.before, S.doc.w, S.doc.h, horiz));
+    if (!ed) return;
+    ed.cel.setData(flipData(ed.before, S.doc.w, S.doc.h, horiz));
     endEdit();
     return;
   }
-  doSnap(() => {
+  doCelSnap(() => {
     if (!liftSel()) return false;
     S.float.data = flipData(S.float.data, S.float.w, S.float.h, horiz);
     S.floatDirty = true;
@@ -255,15 +243,21 @@ function flipSel(horiz) {
 }
 
 function rotateSel() {
+  if (S.tool === 'stamp' && S.stamp && !S.sel) {
+    const st = S.stamp;
+    S.stamp = { w: st.h, h: st.w, data: rotateData(st.data, st.w, st.h) };
+    return toast('Sello rotado');
+  }
   if (!S.sel && !S.float) {
     if (S.doc.w === S.doc.h) {
       const ed = beginEdit();
-      ed.layer.setData(rotateData(ed.before, S.doc.w, S.doc.h));
+      if (!ed) return;
+      ed.cel.setData(rotateData(ed.before, S.doc.w, S.doc.h));
       endEdit();
     } else transformCanvas('rotate');
     return;
   }
-  doSnap(() => {
+  doCelSnap(() => {
     if (!liftSel()) return false;
     const f = S.float;
     const cx = f.x + f.w / 2, cy = f.y + f.h / 2;
@@ -273,6 +267,29 @@ function rotateSel() {
     S.sel = { x: f.x, y: f.y, w: f.w, h: f.h };
     S.floatDirty = true;
   });
+}
+
+/* ---------------- Sello ---------------- */
+
+function stampFromSelection() {
+  const c = selectionPixels();
+  if (!c || !S.sel) return toast('Primero selecciona algo (M)');
+  if (!c.data.some(v => cA(v))) return toast('La selección está vacía');
+  S.stamp = { w: c.w, h: c.h, data: c.data };
+  commitFloat();
+  S.sel = null;
+  setTool('stamp');
+  toast(`Sello de ${c.w}×${c.h} listo`);
+}
+
+function grabTileAsStamp(p) {
+  const tw = S.tileGrid ? S.tileW : 16, th = S.tileGrid ? S.tileH : 16;
+  const r = clipRect({ x: Math.floor(p.x / tw) * tw, y: Math.floor(p.y / th) * th, w: tw, h: th });
+  if (!r) return;
+  const tmp = frameData(S.doc.frame), w = S.doc.w, data = new Uint32Array(r.w * r.h);
+  for (let y = 0; y < r.h; y++) data.set(tmp.subarray((r.y + y) * w + r.x, (r.y + y) * w + r.x + r.w), y * r.w);
+  S.stamp = { w: r.w, h: r.h, data };
+  toast(`Tile ${r.w}×${r.h} copiado como sello`);
 }
 
 /* ---------------- Capas ---------------- */
@@ -286,8 +303,7 @@ function addLayer() {
   commitFloat();
   doSnap(() => {
     const d = S.doc;
-    const n = d.layers.length + 1;
-    d.layers.splice(d.active + 1, 0, new Layer(d.w, d.h, 'Capa ' + n));
+    d.layers.splice(d.active + 1, 0, new Layer('Capa ' + (d.layers.length + 1), d.frames.map(() => new Cel(d.w, d.h))));
     d.active++;
   });
 }
@@ -295,7 +311,7 @@ function duplicateLayer() {
   commitFloat();
   doSnap(() => {
     const d = S.doc, l = activeLayer();
-    const c = new Layer(d.w, d.h, l.name + ' copia', l.data.slice());
+    const c = new Layer(l.name + ' copia', l.cels.map(cel => new Cel(d.w, d.h, cel.data.slice())));
     c.opacity = l.opacity; c.visible = l.visible;
     d.layers.splice(d.active + 1, 0, c);
     d.active++;
@@ -304,10 +320,7 @@ function duplicateLayer() {
 function deleteLayer() {
   commitFloat();
   const d = S.doc;
-  if (d.layers.length <= 1) {
-    const ed = beginEdit(); ed.layer.data.fill(0); ed.layer.dirty = true; endEdit();
-    return toast('Era la única capa: se ha vaciado');
-  }
+  if (d.layers.length <= 1) return toast('Es la única capa');
   doSnap(() => {
     d.layers.splice(d.active, 1);
     d.active = Math.max(0, d.active - 1);
@@ -328,11 +341,15 @@ function mergeDown() {
   if (d.active === 0) return toast('No hay capa debajo');
   doSnap(() => {
     const top = d.layers[d.active], bottom = d.layers[d.active - 1];
-    top.sync(); bottom.sync();
-    const c = h('canvas', { width: d.w, height: d.h }), ctx = c.getContext('2d');
-    ctx.globalAlpha = bottom.visible ? bottom.opacity : 0; ctx.drawImage(bottom.canvas, 0, 0);
-    ctx.globalAlpha = top.visible ? top.opacity : 0; ctx.drawImage(top.canvas, 0, 0);
-    bottom.setData(new Uint32Array(ctx.getImageData(0, 0, d.w, d.h).data.buffer));
+    const c = h('canvas', { width: d.w, height: d.h }), ctx = c.getContext('2d', { willReadFrequently: true });
+    bottom.cels.forEach((bc, f) => {
+      const tc = top.cels[f];
+      bc.sync(); tc.sync();
+      ctx.globalAlpha = 1; ctx.clearRect(0, 0, d.w, d.h);
+      ctx.globalAlpha = bottom.visible ? bottom.opacity : 0; ctx.drawImage(bc.canvas, 0, 0);
+      ctx.globalAlpha = top.visible ? top.opacity : 0; ctx.drawImage(tc.canvas, 0, 0);
+      bc.setData(new Uint32Array(ctx.getImageData(0, 0, d.w, d.h).data.buffer));
+    });
     bottom.opacity = 1; bottom.visible = true;
     d.layers.splice(d.active, 1);
     d.active--;
@@ -343,7 +360,7 @@ function mergeDown() {
 
 function paletteFromImage() {
   const set = new Set();
-  for (const l of S.doc.layers) for (const c of l.data) if (cA(c)) set.add(withAlpha(c, 255));
+  for (const l of S.doc.layers) for (const cel of l.cels) for (const c of cel.data) if (cA(c)) set.add(withAlpha(c, 255));
   if (!set.size) return toast('El dibujo no tiene colores');
   if (set.size > 256) return toast(`Demasiados colores (${set.size}); máximo 256`);
   S.palette = [...set].sort((a, b) => {
@@ -356,7 +373,7 @@ function paletteFromImage() {
 
 function exportPalette() {
   const txt = S.palette.map(c => u32ToHex(c).slice(1)).join('\n');
-  download(new Blob([txt], { type: 'text/plain' }), `${S.fileName}-paleta.hex`);
+  deliver(new Blob([txt], { type: 'text/plain' }), `${S.fileName}-paleta.hex`);
 }
 
 async function importPalette(file) {
@@ -372,9 +389,7 @@ async function importPalette(file) {
     const txt = await file.text();
     for (const line of txt.split(/\r?\n/)) {
       const t = line.trim();
-      if (!t || t.startsWith(';') || t.startsWith('#') && !/^#[0-9a-f]{6}\b/i.test(t)) {
-        continue;
-      }
+      if (!t || t.startsWith(';') || (t.startsWith('#') && !/^#[0-9a-f]{6}\b/i.test(t))) continue;
       const gpl = t.match(/^(\d{1,3})\s+(\d{1,3})\s+(\d{1,3})/);
       if (gpl) { colors.push(rgba(+gpl[1], +gpl[2], +gpl[3])); continue; }
       const hex = t.match(/^#?([0-9a-f]{6})\b/i);
@@ -390,6 +405,7 @@ async function importPalette(file) {
 /* ---------------- Vista ---------------- */
 
 function togglePanels() {
+  if (S.mobile) return closeSheet();
   S.panels = !S.panels;
   $('#app').classList.toggle('focus', !S.panels);
   savePrefs();
@@ -397,41 +413,55 @@ function togglePanels() {
 
 /* ---------------- Archivos ---------------- */
 
-function layerDataForSave(i) {
-  const l = S.doc.layers[i];
-  if (!(S.float && i === S.doc.active)) return l.data;
-  const copy = l.data.slice();
-  stampFloatInto(copy, S.float);
-  return copy;
+function celPNG(cel, li, fi) {
+  const d = S.doc;
+  if (S.float && li === d.active && fi === d.frame) {
+    const copy = cel.data.slice();
+    stampBlock(copy, d.w, d.h, S.float);
+    return u32ToCanvas(copy, d.w, d.h).toDataURL('image/png');
+  }
+  cel.sync();
+  if (cel._pngV !== cel.version) { cel._png = cel.canvas.toDataURL('image/png'); cel._pngV = cel.version; }
+  return cel._png;
 }
 
 function serialize() {
   const d = S.doc;
   return {
-    app: 'PixelEdit', version: 1, w: d.w, h: d.h, active: d.active, name: S.fileName,
-    layers: d.layers.map((l, i) => ({
-      name: l.name, visible: l.visible, opacity: l.opacity,
-      png: u32ToCanvas(layerDataForSave(i), d.w, d.h).toDataURL('image/png'),
+    app: 'PixelEdit', version: 2, w: d.w, h: d.h, active: d.active, frame: d.frame, name: S.fileName,
+    frames: d.frames.map(f => ({ duration: f.duration })),
+    layers: d.layers.map((l, li) => ({
+      name: l.name, visible: l.visible, opacity: l.opacity, locked: l.locked,
+      cels: l.cels.map((c, fi) => celPNG(c, li, fi)),
     })),
     palette: S.palette.map(u32ToHex),
+    tile: { w: S.tileW, h: S.tileH },
   };
 }
 
 async function deserialize(obj) {
   if (!obj || !obj.layers || !obj.w || !obj.h) throw new Error('Archivo no válido');
+  const frames = (obj.frames || [{ duration: 100 }]).map(f => makeFrame(f.duration || 100));
   const layers = [];
   for (const o of obj.layers) {
-    const img = await loadImage(o.png);
-    const l = new Layer(obj.w, obj.h, o.name || 'Capa', imageToU32(img).data);
-    l.visible = o.visible !== false; l.opacity = o.opacity ?? 1;
+    const srcs = o.cels || [o.png]; // v1: una imagen por capa
+    const cels = [];
+    for (let i = 0; i < frames.length; i++) {
+      const src = srcs[i];
+      cels.push(new Cel(obj.w, obj.h, src ? imageToU32(await loadImage(src)).data : undefined));
+    }
+    const l = new Layer(o.name || 'Capa', cels);
+    l.visible = o.visible !== false; l.opacity = o.opacity ?? 1; l.locked = !!o.locked;
     layers.push(l);
   }
-  const doc = makeDoc(obj.w, obj.h, layers);
+  const doc = makeDoc(obj.w, obj.h, { layers, frames });
   doc.active = clamp(obj.active || 0, 0, layers.length - 1);
+  doc.frame = clamp(obj.frame || 0, 0, frames.length - 1);
   return doc;
 }
 
 function replaceDoc(doc, name) {
+  stopPlayback();
   commitFloat();
   doSnap(() => { S.doc = doc; S.sel = null; S.float = null; });
   if (name) S.fileName = name;
@@ -441,21 +471,8 @@ function replaceDoc(doc, name) {
 
 function saveProject() {
   const blob = new Blob([JSON.stringify(serialize())], { type: 'application/json' });
-  download(blob, `${S.fileName}.pixeledit.json`);
+  deliver(blob, `${S.fileName}.pixeledit.json`);
   toast('Proyecto guardado');
-}
-
-function exportPNG(scale = 1) {
-  S.exportScale = scale;
-  composite();
-  const d = S.doc;
-  const c = h('canvas', { width: d.w * scale, height: d.h * scale });
-  const ctx = c.getContext('2d');
-  ctx.imageSmoothingEnabled = false;
-  ctx.drawImage(compCanvas, 0, 0, d.w * scale, d.h * scale);
-  c.toBlob(b => download(b, `${S.fileName}${scale > 1 ? '@' + scale + 'x' : ''}.png`));
-  toast(`PNG exportado ×${scale}`);
-  savePrefs();
 }
 
 function openFileDialog(mode) {
@@ -478,6 +495,7 @@ async function openFile(file) {
       const obj = JSON.parse(await file.text());
       const doc = await deserialize(obj);
       if (obj.palette?.length) S.palette = obj.palette.map(c => hexToU32(c)).filter(c => c != null);
+      if (obj.tile) { S.tileW = obj.tile.w; S.tileH = obj.tile.h; }
       replaceDoc(doc, obj.name || base);
       toast('Proyecto abierto');
     } else if (file.type.startsWith('image/')) {
@@ -486,7 +504,7 @@ async function openFile(file) {
       URL.revokeObjectURL(url);
       const { w, h, data } = imageToU32(img);
       if (w > 2048 || h > 2048) return toast('Imagen demasiado grande (máx. 2048 px)');
-      replaceDoc(makeDoc(w, h, [new Layer(w, h, base || 'Imagen', data)]), base);
+      replaceDoc(makeDoc(w, h, { layers: [new Layer(base || 'Imagen', [new Cel(w, h, data)])] }), base);
       toast(`Imagen abierta ${w}×${h}`);
     } else toast('Formato no soportado');
   } catch (err) {
@@ -497,20 +515,47 @@ async function openFile(file) {
 
 /* ---------------- Persistencia local ---------------- */
 
-const PREFS_KEY = 'pixeledit.prefs', AUTOSAVE_KEY = 'pixeledit.autosave';
+const PREFS_KEY = 'pixeledit.prefs';
+const IDB = {
+  db: null,
+  open() {
+    if (!this.db) {
+      this.db = new Promise((res, rej) => {
+        const r = indexedDB.open('pixeledit', 1);
+        r.onupgradeneeded = () => r.result.createObjectStore('kv');
+        r.onsuccess = () => res(r.result);
+        r.onerror = () => rej(r.error);
+      });
+    }
+    return this.db;
+  },
+  async get(k) {
+    const db = await this.open();
+    return new Promise((res, rej) => {
+      const q = db.transaction('kv').objectStore('kv').get(k);
+      q.onsuccess = () => res(q.result); q.onerror = () => rej(q.error);
+    });
+  },
+  async set(k, v) {
+    const db = await this.open();
+    return new Promise((res, rej) => {
+      const t = db.transaction('kv', 'readwrite');
+      t.objectStore('kv').put(v, k);
+      t.oncomplete = res; t.onerror = () => rej(t.error);
+    });
+  },
+};
+
 let prefsTimer = null, autosaveTimer = null;
+const PREF_KEYS = ['brushSize', 'brushRound', 'pixelPerfect', 'fillShapes', 'grid', 'tileGrid', 'tileW', 'tileH',
+  'panels', 'timeline', 'onion', 'stampSnap', 'exportScale', 'exportFormat', 'sheetCols', 'recentCmds'];
+const hex8 = c => u32ToHex(c) + cA(c).toString(16).padStart(2, '0');
 
 function savePrefs(now = false) {
   clearTimeout(prefsTimer);
   const write = () => {
-    const p = {
-      palette: S.palette.map(u32ToHex), recent: S.recent.map(c => u32ToHex(c) + cA(c).toString(16).padStart(2, '0')),
-      brushSize: S.brushSize, brushRound: S.brushRound, pixelPerfect: S.pixelPerfect, fillShapes: S.fillShapes,
-      grid: S.grid, gridMajor: S.gridMajor, panels: S.panels, exportScale: S.exportScale,
-      primary: u32ToHex(S.primary) + cA(S.primary).toString(16).padStart(2, '0'),
-      secondary: u32ToHex(S.secondary) + cA(S.secondary).toString(16).padStart(2, '0'),
-      recentCmds: S.recentCmds,
-    };
+    const p = { palette: S.palette.map(u32ToHex), recent: S.recent.map(hex8), primary: hex8(S.primary), secondary: hex8(S.secondary) };
+    for (const k of PREF_KEYS) p[k] = S[k];
     try { localStorage.setItem(PREFS_KEY, JSON.stringify(p)); } catch (_) {}
   };
   if (now) write(); else prefsTimer = setTimeout(write, 300);
@@ -524,35 +569,37 @@ function loadPrefs() {
   const pal = (p.palette || []).map(c => hexToU32(c)).filter(c => c != null);
   if (pal.length) S.palette = pal;
   S.recent = (p.recent || []).map(c => hexToU32(c)).filter(c => c != null);
-  for (const k of ['brushSize', 'brushRound', 'pixelPerfect', 'fillShapes', 'grid', 'gridMajor', 'panels', 'exportScale', 'recentCmds']) {
-    if (p[k] !== undefined) S[k] = p[k];
-  }
+  for (const k of PREF_KEYS) if (p[k] !== undefined) S[k] = p[k];
   if (p.primary) S.primary = hexToU32(p.primary) ?? S.primary;
   if (p.secondary) S.secondary = hexToU32(p.secondary) ?? S.secondary;
 }
 
 function markModified() {
   clearTimeout(autosaveTimer);
-  autosaveTimer = setTimeout(autosave, 800);
+  autosaveTimer = setTimeout(autosave, 1200);
 }
-function autosave() {
+async function autosave() {
   clearTimeout(autosaveTimer);
   if (!S.doc) return;
   try {
-    localStorage.setItem(AUTOSAVE_KEY, JSON.stringify(serialize()));
+    await IDB.set('autosave', JSON.stringify(serialize()));
     S.savedAt = new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
-  } catch (_) {
-    S.savedAt = '(sin espacio para autoguardar)';
+  } catch (err) {
+    console.warn(err);
+    S.savedAt = '(no se pudo autoguardar)';
   }
   updateStatus();
 }
 
 async function loadAutosave() {
   try {
-    const obj = JSON.parse(localStorage.getItem(AUTOSAVE_KEY) || 'null');
-    if (!obj) return false;
+    let txt = await IDB.get('autosave').catch(() => null);
+    if (!txt) txt = localStorage.getItem('pixeledit.autosave'); // versión anterior
+    if (!txt) return false;
+    const obj = JSON.parse(txt);
     S.doc = await deserialize(obj);
     S.fileName = obj.name || 'sin-titulo';
+    if (obj.tile) { S.tileW = obj.tile.w; S.tileH = obj.tile.h; }
     return true;
   } catch (err) {
     console.warn('Autoguardado no válido', err);
@@ -560,124 +607,215 @@ async function loadAutosave() {
   }
 }
 
-/* ---------------- Entrada: ratón ---------------- */
+/* ---------------- Entrada: ratón, lápiz y táctil ---------------- */
+
+const touchPts = new Map();
+let gesture = null, longPressTimer = 0;
+const DEFERRED_ON_TOUCH = new Set(['bucket']);     // se aplican al levantar el dedo
+const LONG_PRESS_TOOLS = new Set(['pencil', 'eraser', 'dither', 'line', 'rect', 'ellipse', 'bucket', 'stamp']);
 
 function initPointer() {
   const cv = viewCanvas;
   cv.addEventListener('contextmenu', e => e.preventDefault());
 
   cv.addEventListener('pointerdown', e => {
-    if (dragState || S.modal) return;
-    cv.setPointerCapture(e.pointerId);
+    if (S.modal) return;
+    stopPlayback();
+    closeSheet();
+    const isTouch = e.pointerType === 'touch';
+    if (isTouch) {
+      touchPts.set(e.pointerId, { x: e.clientX, y: e.clientY });
+      if (touchPts.size >= 2) {
+        if (dragState?.touch) {
+          // segundo dedo poco después del primero: era un gesto, no un trazo
+          if (performance.now() - dragState.t0 < 350 || dragState.tool === 'pan' || dragState.deferred) cancelDrag(true);
+          else return;
+        }
+        startGesture();
+        return;
+      }
+      if (gesture) return;
+    }
+    if (dragState) return;
     const btn = e.button;
-    const toolId = btn === 1 ? 'pan' : currentToolId();
     if (btn !== 0 && btn !== 1 && btn !== 2) return;
+    cv.setPointerCapture(e.pointerId);
+    const toolId = btn === 1 ? 'pan' : currentToolId();
     const p = screenToDoc(e.clientX, e.clientY);
-    dragState = { tool: toolId, btn, pointerId: e.pointerId, last: p, used: true };
+    dragState = { tool: toolId, btn, pointerId: e.pointerId, last: p, touch: isTouch, t0: performance.now(), sx: e.clientX, sy: e.clientY };
     if (heldToolKey) heldToolKey.used = true;
-    Tools[toolId].down(p, e, btn);
-    afterPointer(p);
+    if (isTouch && DEFERRED_ON_TOUCH.has(toolId)) dragState.deferred = { p, e: pickEvent(e) };
+    else Tools[toolId].down(p, e, btn);
+    if (isTouch && LONG_PRESS_TOOLS.has(toolId)) {
+      clearTimeout(longPressTimer);
+      longPressTimer = setTimeout(() => longPressPick(e.pointerId), 480);
+    }
+    S.hover = isTouch ? null : p;
+    requestRender(); updateStatus();
     e.preventDefault();
   });
 
   cv.addEventListener('pointermove', e => {
+    const isTouch = e.pointerType === 'touch';
+    if (isTouch && touchPts.has(e.pointerId)) {
+      touchPts.set(e.pointerId, { x: e.clientX, y: e.clientY });
+      if (gesture) { updateGesture(); return; }
+    }
     const p = screenToDoc(e.clientX, e.clientY);
     const moved = !S.hover || S.hover.x !== p.x || S.hover.y !== p.y;
-    S.hover = p;
+    if (!isTouch) S.hover = p;
     if (dragState && dragState.pointerId === e.pointerId) {
+      if (dragState.touch && !dragState.movedFar && Math.hypot(e.clientX - dragState.sx, e.clientY - dragState.sy) > 8) {
+        dragState.movedFar = true;
+        clearTimeout(longPressTimer);
+      }
+      if (dragState.deferred) return;
       const t = Tools[dragState.tool];
       if (dragState.tool === 'pan') t.move(p, e);
-      else if (moved) {
+      else {
         const events = e.getCoalescedEvents ? e.getCoalescedEvents() : [e];
-        for (const ev of events) {
+        for (const ev of events.length ? events : [e]) {
           const q = screenToDoc(ev.clientX, ev.clientY);
           if (q.x === dragState.last.x && q.y === dragState.last.y) continue;
           t.move(q, ev);
           dragState.last = q;
         }
       }
-      dragState.lastEvent = e;
+      dragState.lastEvent = pickEvent(e);
       requestRender();
       updateStatus();
-    } else if (moved) {
+    } else if (moved && !isTouch) {
       requestRender();
       updateStatus();
     }
   });
 
   const end = e => {
+    if (e.pointerType === 'touch') {
+      touchPts.delete(e.pointerId);
+      if (gesture) { if (!touchPts.size) finishGesture(); return; }
+    }
     if (!dragState || dragState.pointerId !== e.pointerId) return;
+    clearTimeout(longPressTimer);
     const p = screenToDoc(e.clientX, e.clientY);
     const t = Tools[dragState.tool];
-    if (dragState.tool !== 'pan' && (p.x !== dragState.last.x || p.y !== dragState.last.y)) t.move(p, e);
-    t.up(p, e);
+    if (dragState.deferred) {
+      if (e.type === 'pointerup') { t.down(dragState.deferred.p, dragState.deferred.e, 0); t.up(p, e); }
+    } else {
+      if (dragState.tool !== 'pan' && (p.x !== dragState.last.x || p.y !== dragState.last.y)) t.move(p, e);
+      t.up(p, e);
+    }
+    const wasTouch = dragState.touch;
     dragState = null;
     if (!S.spaceHeld && !S.altHeld && !heldToolKey) S.tempTool = null;
+    if (wasTouch) S.hover = null;
     refreshAll();
   };
   cv.addEventListener('pointerup', end);
   cv.addEventListener('pointercancel', end);
-  cv.addEventListener('pointerleave', () => { S.hover = null; requestRender(); updateStatus(); });
+  cv.addEventListener('pointerleave', e => { if (e.pointerType !== 'touch') { S.hover = null; requestRender(); updateStatus(); } });
 
   cv.addEventListener('wheel', e => {
     e.preventDefault();
     if (e.shiftKey && !e.ctrlKey) {
-      const d = Math.sign(e.deltaY || e.deltaX);
-      setBrush(S.brushSize - d);
+      setBrush(S.brushSize - Math.sign(e.deltaY || e.deltaX));
       renderToolOptions(); requestRender();
       return;
     }
     const r = cv.getBoundingClientRect();
     if (e.ctrlKey && Math.abs(e.deltaY) < 50) {
-      // gesto de pellizco en trackpad: zoom continuo
-      zoomTo(V.zoom * Math.exp(-e.deltaY * 0.01), e.clientX - r.left, e.clientY - r.top);
+      zoomTo(V.zoom * Math.exp(-e.deltaY * 0.01), e.clientX - r.left, e.clientY - r.top); // pellizco en trackpad
+    } else if (!e.ctrlKey && Math.abs(e.deltaX) > Math.abs(e.deltaY) * 1.5 && e.deltaMode === 0) {
+      V.panX -= e.deltaX; requestRender(); // desplazamiento horizontal de trackpad
     } else {
       zoomStep(e.deltaY < 0 ? 1 : -1, e.clientX - r.left, e.clientY - r.top);
     }
   }, { passive: false });
+
+  // iOS: evita el zoom de página con pellizco
+  document.addEventListener('gesturestart', e => e.preventDefault());
 }
 
-function afterPointer() {
-  requestRender();
-  updateStatus();
+function longPressPick(pointerId) {
+  if (!dragState || dragState.pointerId !== pointerId || dragState.movedFar || gesture) return;
+  const p = dragState.last;
+  cancelDrag(true);
+  dragState = { tool: 'picker', btn: 0, pointerId, last: p, touch: true, t0: performance.now(), movedFar: true };
+  Tools.picker.down(p, {}, 0);
+  toast('Cuentagotas');
+  refreshAll();
 }
 
-/** Cancela el trazo en curso (Esc). */
-function cancelDrag() {
+function gesturePts() {
+  const pts = [...touchPts.values()].slice(0, 2);
+  const r = viewCanvas.getBoundingClientRect();
+  const c = { x: (pts[0].x + pts[1].x) / 2 - r.left, y: (pts[0].y + pts[1].y) / 2 - r.top };
+  return { c, d: Math.max(1, Math.hypot(pts[0].x - pts[1].x, pts[0].y - pts[1].y)) };
+}
+function startGesture() {
+  const { c, d } = gesturePts();
+  if (gesture) { gesture.maxN = Math.max(gesture.maxN, touchPts.size); }
+  gesture = { c0: c, d0: d, z0: V.zoom, px0: V.panX, py0: V.panY, t0: gesture?.t0 || performance.now(), maxN: Math.max(gesture?.maxN || 0, touchPts.size), moved: gesture?.moved || false };
+}
+function updateGesture() {
+  if (touchPts.size < 2) return;
+  const g = gesture, { c, d } = gesturePts();
+  if (!g.moved && (Math.abs(d - g.d0) > 14 || Math.hypot(c.x - g.c0.x, c.y - g.c0.y) > 14)) g.moved = true;
+  if (!g.moved) return;
+  g.c = c;
+  const z = clamp(g.z0 * d / g.d0, 0.05, 200);
+  const dx = (g.c0.x - g.px0) / g.z0, dy = (g.c0.y - g.py0) / g.z0;
+  V.zoom = z;
+  V.panX = Math.round(c.x - dx * z);
+  V.panY = Math.round(c.y - dy * z);
+  requestRender(); updateStatus();
+}
+function finishGesture() {
+  const g = gesture;
+  gesture = null;
+  if (!g.moved && performance.now() - g.t0 < 400) {
+    if (g.maxN === 2) History.undo();
+    else if (g.maxN >= 3) History.redo();
+  } else if (V.zoom > 1 && g.c) {
+    // al terminar el pellizco, redondea a un zoom entero (píxeles nítidos)
+    zoomTo(Math.round(V.zoom), g.c.x, g.c.y);
+  }
+}
+
+/** Cancela el trazo en curso (Esc o segundo dedo). */
+function cancelDrag(silent) {
   if (!dragState) return;
-  if (E) { revertEdit(); E = null; }
-  if (selDrag.before) { restore(selDrag.before); selDrag.before = null; }
+  clearTimeout(longPressTimer);
+  if (E) { E.cel.data.set(E.before); E.cel.dirty = true; E = null; }
+  if (selDrag.before) { restoreCel(selDrag.before); selDrag.before = null; }
   const t = Tools[dragState.tool];
   t.mode = null; t.s = null;
   S.shapeInfo = '';
   dragState = null;
   refreshAll();
-  toast('Trazo cancelado');
+  if (!silent) toast('Trazo cancelado');
 }
 
 /* ---------------- Entrada: teclado ---------------- */
 
 function isTyping(e) {
   const t = e.target;
-  return t && (t.tagName === 'INPUT' && !['range', 'checkbox', 'color', 'button'].includes(t.type) || t.tagName === 'TEXTAREA' || t.isContentEditable);
+  return t && ((t.tagName === 'INPUT' && !['range', 'checkbox', 'color', 'button'].includes(t.type)) || t.tagName === 'TEXTAREA' || t.isContentEditable);
 }
+
+const REPEATABLE = /^(nav\.|nudge\.|brush\.(bigger|smaller)|view\.zoom|edit\.(undo|redo)|color\.|frame\.(prev|next))/;
 
 function initKeyboard() {
   window.addEventListener('keydown', e => {
     if (S.modal) {
       if (e.key === 'Escape') { e.preventDefault(); closeDialog(); }
-      else if (e.key === 'Enter' && S.modal.type === 'dialog') {
-        e.preventDefault();
-        $('#overlay form')?.requestSubmit();
-      }
+      else if (e.key === 'Enter' && S.modal.type === 'dialog') { e.preventDefault(); $('#overlay form')?.requestSubmit(); }
       else if (S.modal.type === 'help') { e.preventDefault(); closeDialog(); }
       return;
     }
-    if (isTyping(e)) {
-      if (e.key === 'Escape') e.target.blur();
-      return;
-    }
+    if (isTyping(e)) { if (e.key === 'Escape') e.target.blur(); return; }
     if (e.key === 'Escape' && dragState) { e.preventDefault(); cancelDrag(); return; }
+    if (e.key === 'Escape' && S.playing) { e.preventDefault(); stopPlayback(); return; }
 
     // Modificadores mantenidos
     if (e.code === 'Space') {
@@ -690,16 +828,14 @@ function initKeyboard() {
       if (!S.altHeld && !e.ctrlKey) { S.altHeld = true; if (!dragState) S.tempTool = 'picker'; refreshTemp(); }
       return;
     }
-    if (e.key === 'Shift' && dragState && dragState.lastEvent) {
-      // redibuja la forma con la restricción activada
-      Tools[dragState.tool].move(dragState.last, { ...pickEvent(dragState.lastEvent), shiftKey: true });
+    if (e.key === 'Shift' && dragState?.lastEvent) {
+      Tools[dragState.tool].move(dragState.last, { ...dragState.lastEvent, shiftKey: true });
       requestRender();
       return;
     }
     if (['Control', 'Shift', 'Meta', 'AltGraph'].includes(e.key)) return;
 
     const combo = comboFromEvent(e);
-
     if (/^[1-9]$/.test(combo)) { e.preventDefault(); pickPaletteIndex(+combo - 1); return; }
     if (combo === 'Ctrl+V') return; // lo gestiona el evento "paste"
 
@@ -707,34 +843,32 @@ function initKeyboard() {
     if (!id) return;
     e.preventDefault();
     if (dragState) return;
+    S.altHeld = false; if (S.tempTool === 'picker') S.tempTool = null;
     const c = CmdById[id];
     if (c.tool) {
       if (e.repeat) return;
-      // pulsación corta: cambia de herramienta · mantener: uso temporal
-      heldToolKey = { key: e.key.toLowerCase(), prev: S.tool, time: performance.now(), used: false };
+      // pulsación corta: cambia de herramienta · mantener mientras dibujas: uso temporal
+      heldToolKey = { code: e.code, prev: S.tool, time: performance.now(), used: false };
       setTool(c.tool);
       refreshAll();
       return;
     }
-    if (e.repeat && !/^(sel\.|brush\.(bigger|smaller)|view\.zoom|edit\.(undo|redo)|color\.)/.test(id)) return;
+    if (e.repeat && !REPEATABLE.test(id)) return;
     runCommand(id);
   });
 
   window.addEventListener('keyup', e => {
     if (e.code === 'Space' && S.spaceHeld) { S.spaceHeld = false; if (!dragState) S.tempTool = null; refreshTemp(); }
-    if (e.key === 'Alt' && S.altHeld) { e.preventDefault(); S.altHeld = false; if (!dragState) S.tempTool = null; refreshTemp(); }
-    if (e.key === 'Shift' && dragState && dragState.lastEvent) {
-      Tools[dragState.tool].move(dragState.last, { ...pickEvent(dragState.lastEvent), shiftKey: false });
+    if (e.key === 'Alt') { e.preventDefault(); if (S.altHeld) { S.altHeld = false; if (!dragState) S.tempTool = null; refreshTemp(); } }
+    if (e.key === 'Shift' && dragState?.lastEvent) {
+      Tools[dragState.tool].move(dragState.last, { ...dragState.lastEvent, shiftKey: false });
       requestRender();
     }
-    if (heldToolKey && e.key.toLowerCase() === heldToolKey.key) {
-      const held = performance.now() - heldToolKey.time;
-      const prev = heldToolKey.prev, used = heldToolKey.used;
+    if (heldToolKey && e.code === heldToolKey.code) {
+      const { prev, used, time } = heldToolKey;
       heldToolKey = null;
-      const heldUsed = t => used && t > 250;
-      if (heldUsed(held) && prev !== S.tool) {
-        if (dragState) { const t = S.tool; S.tool = prev; dragState.tool = t; }
-        else S.tool = prev;
+      if (used && performance.now() - time > 250 && prev !== S.tool) {
+        S.tool = prev;
         refreshAll();
       }
     }
@@ -757,7 +891,7 @@ function initKeyboard() {
 }
 
 function pickEvent(e) {
-  return { clientX: e.clientX, clientY: e.clientY, shiftKey: e.shiftKey, ctrlKey: e.ctrlKey, altKey: e.altKey };
+  return { clientX: e.clientX, clientY: e.clientY, shiftKey: e.shiftKey, ctrlKey: e.ctrlKey, altKey: e.altKey, metaKey: e.metaKey };
 }
 
 function refreshTemp() {
@@ -777,6 +911,23 @@ function initDrop() {
   });
 }
 
+/* ---------------- Diseño escritorio / móvil ---------------- */
+
+const mobileQuery = matchMedia('(max-width: 760px), (max-height: 520px) and (pointer: coarse)');
+function applyLayout() {
+  const app = $('#app');
+  S.mobile = mobileQuery.matches;
+  app.classList.toggle('mobile', S.mobile);
+  app.classList.toggle('landscape', S.mobile && innerWidth > innerHeight);
+  app.classList.toggle('focus', !S.mobile && !S.panels);
+  app.classList.toggle('no-timeline', !S.timeline);
+  const opts = $('#tool-options');
+  if (S.mobile) $('#mobile-opts').append(opts);
+  else $('#topbar').insertBefore(opts, $('#cmd-button'));
+  closeSheet();
+  if (S.doc) refreshAll();
+}
+
 /* ---------------- Arranque ---------------- */
 
 async function init() {
@@ -784,28 +935,41 @@ async function init() {
   registerCommands();
   buildToolbar();
   buildColorPanel();
+  initPicker();
   buildLayersPanel();
+  buildTimeline();
   document.querySelectorAll('[data-cmd]').forEach(b => {
     const c = CmdById[b.dataset.cmd];
-    if (c?.keys[0]) b.title = `${c.label} (${prettyKey(c.keys[0])})`;
+    if (c?.keys[0] && !b.title) b.title = `${c.label} (${prettyKey(c.keys[0])})`;
     b.addEventListener('click', () => runCommand(b.dataset.cmd));
   });
+  document.querySelectorAll('[data-sheet-open]').forEach(b => b.addEventListener('click', () => openSheet(b.dataset.sheetOpen)));
+  $('#sheet-close').addEventListener('click', closeSheet);
+  $('#sheet-backdrop').addEventListener('click', closeSheet);
   $('#st-size').addEventListener('click', () => runCommand('canvas.resize'));
   $('#st-zoom').addEventListener('click', () => runCommand('view.fit'));
-  $('#overlay').addEventListener('mousedown', e => { if (e.target.id === 'overlay') closeDialog(); });
-  $('#app').classList.toggle('focus', !S.panels);
+  $('#overlay').addEventListener('click', e => { if (e.target.id === 'overlay' || S.modal?.type === 'help') closeDialog(); });
 
   initView();
+  initPreviewNav();
   if (!(await loadAutosave())) S.doc = makeDoc(32, 32);
   initPointer();
   initKeyboard();
   initDrop();
+  mobileQuery.addEventListener('change', applyLayout);
+  window.addEventListener('resize', () => $('#app').classList.toggle('landscape', S.mobile && innerWidth > innerHeight));
+  applyLayout();
+
   window.addEventListener('beforeunload', () => { autosave(); savePrefs(true); });
+  document.addEventListener('visibilitychange', () => { if (document.hidden) { autosave(); savePrefs(true); } });
   // Los botones no se quedan con el foco: así Espacio/Intro siguen siendo atajos.
   document.addEventListener('click', e => {
     const b = e.target.closest('button');
     if (b && !b.closest('#overlay')) b.blur();
   });
+  if ('serviceWorker' in navigator && location.protocol === 'https:') {
+    navigator.serviceWorker.register('sw.js').catch(() => {});
+  }
   fitView();
   renderRecent();
   refreshAll();

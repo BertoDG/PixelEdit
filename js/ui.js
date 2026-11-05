@@ -24,6 +24,7 @@ function refreshAll() {
   renderColors();
   renderPalette();
   renderLayers();
+  renderTimeline();
   updateStatus();
   updateCursor();
   requestRender();
@@ -36,7 +37,7 @@ function buildToolbar() {
   bar.innerHTML = '';
   TOOL_ORDER.forEach((id, i) => {
     const t = Tools[id];
-    if (i === 5 || i === 8) bar.append(h('div', { class: 'sep' }));
+    if (TOOL_SEPARATORS.includes(i)) bar.append(h('div', { class: 'sep' }));
     bar.append(h('button', {
       class: 'tool', 'data-tool': id, title: `${t.label} (${t.key})\n${t.hint}`,
       html: icon(id) + `<span class="k">${t.key}</span>`,
@@ -72,9 +73,25 @@ function renderToolOptions() {
   }
   if (t.id === 'pencil') box.append(chip('Pixel perfect', 'P', S.pixelPerfect, () => CmdById['brush.pp'].run()));
   if (t.fillable) box.append(chip('Relleno', 'F', S.fillShapes, () => CmdById['brush.fill'].run()));
-  if (t.brush || t.id === 'bucket') {
+  if (t.id === 'stamp') {
+    box.append(h('span', { class: 'opt-val' }, S.stamp ? `${S.stamp.w}×${S.stamp.h}` : 'sin sello'));
+    box.append(chip('Desde selección', 'Ctrl+B', false, () => runCommand('sel.toStamp')));
+    box.append(chip('Ajustar a tiles', 'Shift+S', S.stampSnap && S.tileGrid, () => {
+      if (!S.tileGrid) { S.tileGrid = true; S.stampSnap = true; } else S.stampSnap = !S.stampSnap;
+      savePrefs();
+    }));
+  }
+  if (t.brush || t.id === 'bucket' || t.id === 'stamp') {
     box.append(chip('↔', 'Shift+X', S.mirrorX, () => CmdById['mirror.x'].run(), 'Simetría izquierda/derecha (Shift+X)'));
     box.append(chip('↕', 'Shift+Y', S.mirrorY, () => CmdById['mirror.y'].run(), 'Simetría arriba/abajo (Shift+Y)'));
+  }
+  if (S.mobile && (t.id === 'select' || t.id === 'move')) {
+    box.append(chip('Copiar', null, false, () => runCommand('edit.copy')));
+    box.append(chip('Pegar', null, false, () => runCommand('edit.paste')));
+    box.append(chip('Borrar', null, false, () => runCommand('edit.delete')));
+    box.append(chip('Voltear', null, false, () => runCommand('edit.flipH')));
+    box.append(chip('Fijar', null, false, () => runCommand('sel.commit')));
+    box.append(chip('→ Sello', null, false, () => runCommand('sel.toStamp')));
   }
   box.append(h('span', { class: 'opt-hint' }, t.hint));
 }
@@ -89,6 +106,7 @@ function renderColors() {
   const p = $('#sw-primary'), s = $('#sw-secondary');
   p.innerHTML = `<i style="${swatchStyle(S.primary)}"></i>`;
   s.innerHTML = `<i style="${swatchStyle(S.secondary)}"></i>`;
+  $('#m-color').innerHTML = `<i style="${swatchStyle(S.primary)}"></i>`;
   const hex = $('#hex-input');
   if (document.activeElement !== hex) hex.value = u32ToHex(S.primary).slice(1);
   $('#alpha-input').value = cA(S.primary);
@@ -103,6 +121,61 @@ function renderColors() {
     }));
   });
   document.querySelectorAll('#palette .sw').forEach(el => el.classList.toggle('cur', +el.dataset.c === S.primary));
+  renderPicker();
+}
+
+/* Selector HSV integrado (funciona igual con ratón y con el dedo) */
+const picker = { h: 0, s: 0, v: 0, color: null };
+function syncPickerFromColor() {
+  if (picker.color === S.primary) return;
+  const [hh, ss, vv] = rgbToHsv(cR(S.primary), cG(S.primary), cB(S.primary));
+  if (ss > 0.01 && vv > 0.01) picker.h = hh;
+  picker.s = ss; picker.v = vv; picker.color = S.primary;
+}
+function renderPicker() {
+  const sv = $('#sv'), hue = $('#hue');
+  if (!sv.offsetParent) return;
+  syncPickerFromColor();
+  const dpr = window.devicePixelRatio || 1;
+  for (const c of [sv, hue]) {
+    const w = Math.round(c.clientWidth * dpr), hh = Math.round(c.clientHeight * dpr);
+    if (c.width !== w || c.height !== hh) { c.width = w; c.height = hh; }
+  }
+  let ctx = sv.getContext('2d'), W = sv.width, H = sv.height;
+  const [r, g, b] = hsvToRgb(picker.h, 1, 1);
+  ctx.fillStyle = `rgb(${r},${g},${b})`; ctx.fillRect(0, 0, W, H);
+  let gr = ctx.createLinearGradient(0, 0, W, 0);
+  gr.addColorStop(0, '#fff'); gr.addColorStop(1, 'rgba(255,255,255,0)');
+  ctx.fillStyle = gr; ctx.fillRect(0, 0, W, H);
+  gr = ctx.createLinearGradient(0, 0, 0, H);
+  gr.addColorStop(0, 'rgba(0,0,0,0)'); gr.addColorStop(1, '#000');
+  ctx.fillStyle = gr; ctx.fillRect(0, 0, W, H);
+  ctx.lineWidth = 2 * dpr;
+  ctx.strokeStyle = picker.v > 0.5 ? '#000' : '#fff';
+  ctx.beginPath(); ctx.arc(picker.s * W, (1 - picker.v) * H, 5 * dpr, 0, Math.PI * 2); ctx.stroke();
+  ctx = hue.getContext('2d'); W = hue.width; H = hue.height;
+  gr = ctx.createLinearGradient(0, 0, W, 0);
+  for (let i = 0; i <= 6; i++) { const [a, b2, c] = hsvToRgb(i * 60, 1, 1); gr.addColorStop(i / 6, `rgb(${a},${b2},${c})`); }
+  ctx.fillStyle = gr; ctx.fillRect(0, 0, W, H);
+  ctx.fillStyle = '#fff'; ctx.strokeStyle = '#000'; ctx.lineWidth = dpr;
+  const x = picker.h / 360 * W;
+  ctx.fillRect(x - 2 * dpr, 0, 4 * dpr, H); ctx.strokeRect(x - 2 * dpr, 0, 4 * dpr, H);
+}
+function initPicker() {
+  const apply = () => {
+    const [r, g, b] = hsvToRgb(picker.h, picker.s, picker.v);
+    S.primary = rgba(r, g, b, cA(S.primary) || 255);
+    picker.color = S.primary;
+    renderColors(); renderPalette(); requestRender();
+  };
+  const drag = (el, fn) => {
+    const go = e => { const r = el.getBoundingClientRect(); fn(clamp((e.clientX - r.left) / r.width, 0, 1), clamp((e.clientY - r.top) / r.height, 0, 1)); apply(); };
+    el.addEventListener('pointerdown', e => { el.setPointerCapture(e.pointerId); go(e); });
+    el.addEventListener('pointermove', e => { if (el.hasPointerCapture(e.pointerId)) go(e); });
+    el.addEventListener('pointerup', () => addRecent(S.primary));
+  };
+  drag($('#sv'), (x, y) => { picker.s = x; picker.v = 1 - y; });
+  drag($('#hue'), x => { picker.h = Math.min(359.9, x * 360); });
 }
 
 function buildColorPanel() {
@@ -189,17 +262,17 @@ function renderLayers() {
   list.innerHTML = '';
   const d = S.doc;
   for (let i = d.layers.length - 1; i >= 0; i--) {
-    const l = d.layers[i];
+    const l = d.layers[i], cel = l.cels[d.frame];
     const thumb = h('canvas', { class: 'thumb', width: 28, height: 28 });
     const tctx = thumb.getContext('2d');
-    l.sync();
+    cel.sync();
     tctx.imageSmoothingEnabled = false;
     const s = Math.min(28 / d.w, 28 / d.h);
-    tctx.drawImage(l.canvas, (28 - d.w * s) / 2, (28 - d.h * s) / 2, d.w * s, d.h * s);
+    tctx.drawImage(cel.canvas, (28 - d.w * s) / 2, (28 - d.h * s) / 2, d.w * s, d.h * s);
     const name = h('span', { class: 'name', title: 'Doble clic para renombrar' }, l.name);
     name.ondblclick = () => renameLayer(i, name);
     list.append(h('div', {
-      class: 'layer' + (i === d.active ? ' active' : '') + (l.visible ? '' : ' hidden'),
+      class: 'layer' + (i === d.active ? ' active' : '') + (l.visible ? '' : ' hidden') + (l.locked ? ' locked' : ''),
       onclick: () => { selectLayer(i); refreshAll(); },
     },
       h('button', {
@@ -207,7 +280,12 @@ function renderLayers() {
         onclick: e => { e.stopPropagation(); l.visible = !l.visible; markModified(); refreshAll(); },
       }),
       thumb, name,
-      l.opacity < 1 ? h('span', { class: 'op' }, Math.round(l.opacity * 100) + '%') : null));
+      l.opacity < 1 ? h('span', { class: 'op' }, Math.round(l.opacity * 100) + '%') : null,
+      h('button', {
+        class: 'lock' + (l.locked ? ' on' : ''), title: 'Bloquear (Alt+L)', html: l.locked ? '🔒' : '🔓',
+        onclick: e => { e.stopPropagation(); l.locked = !l.locked; markModified(); refreshAll(); },
+      }),
+      S.mobile ? h('button', { class: 'ren', title: 'Renombrar', html: '✎', onclick: e => { e.stopPropagation(); renameLayer(i, name); } }) : null));
   }
   const op = $('#layer-opacity');
   op.value = Math.round(activeLayer().opacity * 100);
@@ -253,19 +331,23 @@ function updateStatus() {
   let pos = '—', col = '';
   if (p && inBounds(p.x, p.y)) {
     pos = `${p.x}, ${p.y}`;
-    const c = activeLayer().data[p.y * S.doc.w + p.x];
+    const c = activeCel().data[p.y * S.doc.w + p.x];
     col = cA(c) ? u32ToHex(c) + (cA(c) < 255 ? ` ${Math.round(cA(c) / 2.55)}%` : '') : 'transparente';
+    if (S.tileGrid) pos += `  · tile ${Math.floor(p.x / S.tileW)},${Math.floor(p.y / S.tileH)}`;
   }
   $('#st-tool').textContent = t.label;
   $('#st-pos').textContent = pos;
   $('#st-color').textContent = col;
   $('#st-size').textContent = `${S.doc.w}×${S.doc.h}`;
-  $('#st-zoom').textContent = (V.zoom >= 1 ? Math.round(V.zoom * 100) : (V.zoom * 100).toFixed(0)) + '%';
+  $('#st-zoom').textContent = (V.zoom * 100).toFixed(0) + '%';
+  $('#st-frame').textContent = S.doc.frames.length > 1 ? `fotograma ${S.doc.frame + 1}/${S.doc.frames.length}` : '';
   const sel = S.shapeInfo || (S.sel ? `sel ${S.sel.w}×${S.sel.h}${S.float ? ' (flotante)' : ''}` : '');
   $('#st-sel').textContent = sel;
   const flags = [];
   if (S.mirrorX) flags.push('↔'); if (S.mirrorY) flags.push('↕');
-  if (S.tile) flags.push('mosaico'); if (S.gridMajor) flags.push('bloques ' + S.gridMajor);
+  if (S.tile) flags.push('mosaico'); if (S.tileGrid) flags.push(`tiles ${S.tileW}×${S.tileH}`);
+  if (S.onion) flags.push('cebolla');
+  if (activeLayer().locked) flags.push('🔒 capa bloqueada');
   $('#st-flags').textContent = flags.join(' · ');
   $('#st-save').textContent = S.savedAt ? 'Autoguardado ' + S.savedAt : '';
 }
@@ -362,26 +444,29 @@ function dlgScale() {
   [{ label: 'Cancelar' }, { label: 'Escalar', primary: true, run: () => scaleImage(+w.input.value, +hh.input.value) }]);
 }
 
-function dlgExport() {
-  let scale = S.exportScale || 1;
-  const name = h('input', { type: 'text', value: S.fileName });
-  const info = h('p', { class: 'muted' });
-  const scales = h('div', { class: 'presets' });
-  const draw = () => {
-    scales.innerHTML = '';
-    [1, 2, 4, 8, 10, 16, 20].forEach(s => scales.append(h('button', {
-      type: 'button', class: s === scale ? 'on' : '', onclick: () => { scale = s; draw(); },
-    }, '×' + s)));
-    info.textContent = `Resultado: ${S.doc.w * scale}×${S.doc.h * scale} px`;
-  };
-  draw();
-  openDialog('Exportar PNG', [h('label', { class: 'field' }, h('span', {}, 'Nombre'), name),
-    h('div', { class: 'field' }, h('span', {}, 'Escala'), scales), info],
-  [{ label: 'Cancelar' }, { label: 'Exportar', primary: true, run: () => {
-    S.fileName = name.value.trim() || 'pixel-art';
-    exportPNG(scale);
+function dlgTileSize() {
+  const w = numField('Ancho del tile', S.tileW, 1, 512), hh = numField('Alto del tile', S.tileH, 1, 512);
+  const presets = h('div', { class: 'presets' }, [8, 16, 24, 32, 48, 64].map(n =>
+    h('button', { type: 'button', onclick: () => { w.input.value = n; hh.input.value = n; } }, `${n}×${n}`)));
+  openDialog('Cuadrícula de tiles', [h('div', { class: 'row' }, w.row, hh.row), presets,
+    h('p', { class: 'muted' }, 'Se usa para la cuadrícula de escenarios y para ajustar el sello.')],
+  [{ label: 'Cancelar' }, { label: 'Aplicar', primary: true, run: () => {
+    S.tileW = clamp(+w.input.value || 16, 1, 512); S.tileH = clamp(+hh.input.value || 16, 1, 512);
+    S.tileGrid = true; savePrefs(); refreshAll();
   } }]);
 }
+
+/* ---------------- Hojas inferiores (móvil) ---------------- */
+
+function openSheet(name) {
+  const app = $('#app');
+  if (app.classList.contains('sheet-open') && app.dataset.sheet === name) return closeSheet();
+  app.dataset.sheet = name;
+  app.classList.add('sheet-open');
+  $('#sheet-title').textContent = { color: 'Color', layers: 'Capas' }[name] || '';
+  requestAnimationFrame(() => { renderPicker(); renderPreview(); });
+}
+function closeSheet() { $('#app').classList.remove('sheet-open'); }
 
 /* ---------------- Paleta de comandos ---------------- */
 
@@ -398,7 +483,13 @@ function openCommandPalette(initial = '') {
     const all = Commands.filter(c => !c.hidden);
     if (!words.length) {
       const rec = (S.recentCmds || []).map(id => CmdById[id]).filter(Boolean);
-      items = [...rec, ...all.filter(c => !rec.includes(c))];
+      let rest = all.filter(c => !rec.includes(c));
+      if (S.mobile) {
+        // en móvil las herramientas ya están abajo: primero archivo, animación y capas
+        const order = ['Archivo', 'Animación', 'Capas', 'Lienzo', 'Edición', 'Selección', 'Vista', 'Color', 'Pincel', 'Ayuda', 'Herramientas'];
+        rest = rest.sort((a, b) => order.indexOf(a.group) - order.indexOf(b.group));
+      }
+      items = [...rec, ...rest];
     } else {
       items = all.map(c => {
         const text = normalizeText(c.label + ' ' + c.group + ' ' + c.keys.join(' '));
@@ -411,7 +502,7 @@ function openCommandPalette(initial = '') {
     sel = clamp(sel, 0, Math.max(0, items.length - 1));
     list.innerHTML = '';
     items.forEach((c, i) => {
-      const row = h('div', { class: 'cmd-item' + (i === sel ? ' sel' : ''), onmousedown: e => { e.preventDefault(); run(i); } },
+      const row = h('div', { class: 'cmd-item' + (i === sel ? ' sel' : ''), onclick: () => run(i) },
         h('span', { class: 'grp' }, c.group),
         h('span', { class: 'lab' }, c.label),
         h('span', { class: 'keys' }, c.keys.slice(0, 2).map(k => h('kbd', {}, prettyKey(k)))));
@@ -436,7 +527,7 @@ function openCommandPalette(initial = '') {
   ov.append(h('div', { class: 'cmd-box' }, input, list));
   ov.classList.add('open');
   S.modal = { type: 'cmd' };
-  input.focus();
+  if (!S.mobile) input.focus();
   update();
 }
 
@@ -461,15 +552,27 @@ function openHelp() {
     ['1 … 9', 'Elegir color de la paleta'],
     ['Esc durante un trazo', 'Cancelar el trazo'],
     ['Arrastrar un archivo', 'Abrir PNG / proyecto'],
+    ['Clic en la vista previa', 'Saltar a esa zona del escenario'],
   ];
+  const touch = [
+    ['1 dedo', 'Dibujar con la herramienta actual'],
+    ['2 dedos', 'Mover y hacer zoom (pellizcar)'],
+    ['Toque con 2 dedos', 'Deshacer'],
+    ['Toque con 3 dedos', 'Rehacer'],
+    ['Mantener el dedo quieto', 'Cuentagotas'],
+    ['☰ (arriba a la izquierda)', 'Todas las acciones, con buscador'],
+  ];
+  const touchSec = h('section', {}, h('h3', {}, 'Pantalla táctil'),
+    touch.map(([k, v]) => h('div', { class: 'help-row gesture' }, h('kbd', {}, k), h('span', {}, v))));
   const cols = Object.entries(groups).map(([g, cs]) => h('section', {},
     h('h3', {}, g),
     cs.map(c => h('div', { class: 'help-row' }, h('span', {}, c.label), h('span', {}, c.keys.map(k => h('kbd', {}, prettyKey(k))))))));
+  if (S.mobile) cols.unshift(touchSec); else cols.push(touchSec);
   cols.push(h('section', {}, h('h3', {}, 'Ratón y gestos'),
     extra.map(([k, v]) => h('div', { class: 'help-row gesture' }, h('kbd', {}, k), h('span', {}, v)))));
   ov.append(h('div', { class: 'help' },
-    h('div', { class: 'help-head' }, h('h2', {}, 'Atajos de teclado'),
-      h('span', { class: 'muted' }, 'Ctrl+K busca cualquier acción por nombre · Esc para cerrar')),
+    h('div', { class: 'help-head' }, h('h2', {}, S.mobile ? 'Ayuda' : 'Atajos de teclado'),
+      h('span', { class: 'muted' }, S.mobile ? 'Toca fuera para cerrar' : 'Ctrl+K busca cualquier acción por nombre · Esc para cerrar')),
     h('div', { class: 'help-cols' }, cols)));
   ov.classList.add('open');
   S.modal = { type: 'help' };

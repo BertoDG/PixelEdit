@@ -1,7 +1,50 @@
 # PixelEdit
 
-Editor de pixel art en el navegador, pensado para trabajar **rápido y con el teclado**.
-No necesita instalación ni compilación: abre `index.html` en Chrome, Edge o Firefox.
+Editor de pixel art en el navegador para **animaciones y escenarios**, organizado por **capas**,
+pensado para trabajar rápido con el teclado en el escritorio y con el dedo en el iPhone.
+No necesita instalación ni compilación: abre `index.html` en Chrome, Edge, Firefox o Safari.
+
+## Usarlo en el iPhone
+
+1. Publica el repositorio con GitHub Pages: en GitHub, *Settings → Pages → Build and deployment*,
+   elige *Deploy from a branch*, rama `main`, carpeta `/ (root)`. La dirección será
+   `https://<usuario>.github.io/PixelEdit/`.
+2. Abre esa dirección en Safari, pulsa *Compartir → Añadir a pantalla de inicio*.
+   Se abre a pantalla completa, como una app, y funciona sin conexión.
+
+Gestos: **1 dedo** dibuja · **2 dedos** mueven y hacen zoom · **toque con 2 dedos** deshace ·
+**toque con 3 dedos** rehace · **mantener el dedo quieto** = cuentagotas · **☰** abre todas las acciones.
+Al exportar en el iPhone se abre el menú *Compartir* (por ejemplo, para guardar en Fotos).
+
+## Animación
+
+Cada capa tiene un *cel* por fotograma. La línea de tiempo está bajo el lienzo.
+
+| Tecla | Acción |
+|---|---|
+| `←` `→` | fotograma anterior / siguiente (si hay selección, la mueven) |
+| `↑` `↓` | capa superior / inferior |
+| `Alt+D` | duplicar fotograma (lo habitual para animar) |
+| `Alt+N` | fotograma vacío |
+| `Alt+Supr` | eliminar fotograma |
+| `Alt+←` `Alt+→` | reordenar fotogramas |
+| `Intro` | reproducir / pausar |
+| `Shift+O` | papel cebolla (anterior en rojo, siguiente en azul) |
+| `Alt+T` | mostrar / ocultar la línea de tiempo |
+
+Los fps se cambian en la línea de tiempo. Haz doble clic en un fotograma para darle una duración propia.
+**Exportar** (`Ctrl+Shift+E`): PNG del fotograma actual, **GIF animado** o **hoja de sprites** (con columnas configurables).
+
+## Escenarios
+
+- **Cuadrícula de tiles** (`Ctrl+Shift+G`, tamaño en *Tamaño de tile…*), aparte de la cuadrícula de píxeles.
+- **Sello** (`S`): selecciona un trozo (un tile, un árbol, una roca…), pulsa `Ctrl+B` y píntalo
+  por el escenario. Con la cuadrícula de tiles activa encaja en cada casilla (`Shift+S` lo activa o desactiva).
+  `Ctrl+clic` con el sello copia el tile que hay bajo el cursor. Con clic derecho borras con su forma.
+  `Shift+H`/`Shift+V`/`Shift+R` voltean o rotan el sello.
+- **Bloquear capas** (`Alt+L` o el candado) para no pintar sin querer en el fondo.
+- **Vista previa navegable**: haz clic o arrastra sobre ella para moverte por escenarios grandes.
+- Lienzos de hasta 2048×2048, con redibujado parcial para que el trazo siga siendo fluido.
 
 ## Ideas principales
 
@@ -32,6 +75,7 @@ No necesita instalación ni compilación: abre `index.html` en Chrome, Edge o Fi
 | `D` | Trama | dithering en tablero con color 1 / color 2 |
 | `L` | Línea | `Shift` ajusta a ángulos limpios (0°, 1:2, 45°, 2:1, 90°) |
 | `R` / `O` | Rectángulo / Elipse | `Shift` hace cuadrado o círculo, `F` alterna el relleno |
+| `S` | Sello | pincel hecho con un trozo del dibujo o un tile (ver *Escenarios*) |
 | `M` | Selección | arrastra dentro para mover; las flechas mueven 1 px; `Intro` fija la selección y `Esc` la quita |
 | `V` | Mover | mueve la selección o la capa entera |
 | `H` | Mano | |
@@ -45,7 +89,8 @@ mosaico para tiles, `Tab` oculta los paneles, `Esc` cancela el trazo en curso,
 
 ## Archivos
 
-- **Guardar** (`Ctrl+S`) descarga un proyecto `.pixeledit.json` con las capas y la paleta.
+- **Guardar** (`Ctrl+S`) descarga un proyecto `.pixeledit.json` con capas, fotogramas y paleta.
+- El autoguardado usa el almacenamiento del navegador (IndexedDB), así que caben proyectos grandes.
 - **Abrir** (`Ctrl+O`) o arrastrar a la ventana: proyectos `.json` o imágenes PNG/GIF/etc.
 - **Exportar PNG** (`Ctrl+Shift+E`) a escala ×1–×20; `Ctrl+E` repite la última exportación.
 - Las paletas se importan desde `.hex`, `.gpl` (GIMP/Aseprite) o desde una imagen.
@@ -60,10 +105,13 @@ Todos los atajos están en `js/commands.js`. Edita el campo de teclas de cada `c
 index.html        interfaz
 css/style.css     estilos
 js/util.js        colores, algoritmos de líneas/elipses, utilidades DOM
-js/doc.js         capas, estado, historial (deshacer/rehacer), selección flotante
+js/doc.js         capas, fotogramas (cels), estado, historial, selección flotante
+js/anim.js        línea de tiempo, reproducción y exportación (GIF, hoja de sprites)
+js/gif.js         codificador de GIF animado propio
 js/view.js        zoom, desplazamiento y dibujado del lienzo
 js/tools.js       herramientas
 js/commands.js    comandos y atajos de teclado
 js/ui.js          paneles, diálogos, paleta de comandos, ayuda
-js/main.js        operaciones, entrada de ratón/teclado, archivos y autoguardado
+js/main.js        operaciones, ratón/teclado/táctil, archivos, autoguardado, diseño móvil
+sw.js, manifest.webmanifest, icons/   instalación como app (PWA)
 ```

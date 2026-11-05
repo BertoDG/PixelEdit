@@ -2,23 +2,39 @@
 <html lang="es">
 <head>
   <meta charset="utf-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no, viewport-fit=cover">
+  <meta name="theme-color" content="#1f2028">
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  <meta name="mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+  <meta name="apple-mobile-web-app-title" content="PixelEdit">
+  <link rel="manifest" href="manifest.webmanifest">
+  <link rel="icon" href="icons/icon-192.png">
+  <link rel="apple-touch-icon" href="icons/apple-touch-icon.png">
   <title>PixelEdit</title>
   <link rel="stylesheet" href="css/style.css">
 </head>
 <body>
   <div id="app">
     <header id="topbar">
-      <div class="brand"><span class="logo"></span>PixelEdit</div>
-      <nav class="file-actions">
+      <button class="mobile-only icon-btn" data-cmd="ui.palette" title="Todas las acciones" aria-label="Menú">☰</button>
+      <div class="brand desktop-only"><span class="logo"></span>PixelEdit</div>
+      <nav class="file-actions desktop-only">
         <button data-cmd="file.new">Nuevo</button>
         <button data-cmd="file.open">Abrir</button>
         <button data-cmd="file.save">Guardar</button>
         <button data-cmd="file.export">Exportar</button>
       </nav>
+      <button class="icon-btn" data-cmd="edit.undo" title="Deshacer (Ctrl+Z)" aria-label="Deshacer">↶</button>
+      <button class="icon-btn" data-cmd="edit.redo" title="Rehacer (Ctrl+Y)" aria-label="Rehacer">↷</button>
       <div id="tool-options"></div>
-      <button id="cmd-button" data-cmd="ui.palette">Buscar acción… <kbd>Ctrl K</kbd></button>
-      <button class="round" data-cmd="ui.help" title="Atajos (?)">?</button>
+      <span class="grow mobile-only"></span>
+      <button class="mobile-only icon-btn" data-cmd="view.timeline" title="Línea de tiempo" aria-label="Línea de tiempo">🎞</button>
+      <button class="mobile-only icon-btn" data-sheet-open="layers" title="Capas" aria-label="Capas">▤</button>
+      <button class="mobile-only swatch m-color" id="m-color" data-sheet-open="color" title="Color" aria-label="Color"></button>
+      <button class="mobile-only icon-btn" data-cmd="file.export" title="Exportar" aria-label="Exportar">⇪</button>
+      <button id="cmd-button" class="desktop-only" data-cmd="ui.palette">Buscar acción… <kbd>Ctrl K</kbd></button>
+      <button class="round" data-cmd="ui.help" title="Ayuda (?)">?</button>
     </header>
 
     <aside id="toolbar"></aside>
@@ -27,27 +43,53 @@
       <canvas id="view"></canvas>
     </main>
 
+    <section id="timeline">
+      <div class="tl-controls">
+        <button id="tl-play" class="tl-btn primary-btn" title="Reproducir / pausar (Intro)">▶</button>
+        <button id="tl-prev" class="tl-btn" title="Fotograma anterior (←)">◀</button>
+        <span id="tl-info" class="muted"></span>
+        <button id="tl-next" class="tl-btn" title="Fotograma siguiente (→)">▶</button>
+        <span class="tl-sep"></span>
+        <button id="tl-add" class="tl-btn" title="Nuevo fotograma vacío (Alt+N)">＋</button>
+        <button id="tl-dup" class="tl-btn" title="Duplicar fotograma (Alt+D)">⧉</button>
+        <button id="tl-del" class="tl-btn" title="Eliminar fotograma (Alt+Supr)">✕</button>
+        <button id="tl-onion" class="tl-btn" title="Papel cebolla (Shift+O)">◐</button>
+        <label class="fps" title="Fotogramas por segundo">fps <input id="tl-fps" type="number" min="1" max="60" inputmode="numeric"></label>
+      </div>
+      <div id="frames"></div>
+    </section>
+
+    <div id="mobile-opts"></div>
+
+    <div id="sheet-backdrop"></div>
     <aside id="sidebar">
-      <section class="panel">
+      <div class="sheet-head mobile-only">
+        <span class="grab"></span>
+        <strong id="sheet-title"></strong>
+        <button id="sheet-close" class="icon-btn" aria-label="Cerrar">✕</button>
+      </div>
+      <section class="panel" data-sheet="color">
         <div class="colors">
           <div class="swatch-pair">
-            <button id="sw-primary" class="swatch big" title="Color 1 · clic izquierdo (C para editar)"></button>
+            <button id="sw-primary" class="swatch big" title="Color 1 · clic izquierdo (C abre el selector del sistema)"></button>
             <button id="sw-secondary" class="swatch big second" title="Color 2 · clic derecho"></button>
             <button id="swap-colors" class="mini" title="Intercambiar (X)">⇄</button>
           </div>
           <div class="color-fields">
-            <label class="hex"><span>#</span><input id="hex-input" maxlength="8" spellcheck="false"></label>
+            <label class="hex"><span>#</span><input id="hex-input" maxlength="8" spellcheck="false" autocomplete="off" autocapitalize="off"></label>
             <label class="alpha" title="Opacidad del color 1">
               <input id="alpha-input" type="range" min="0" max="255">
               <span id="alpha-val"></span>
             </label>
           </div>
         </div>
-        <div class="sub">Rampa <span class="muted">Q oscurecer · W aclarar</span></div>
+        <canvas id="sv" class="sv"></canvas>
+        <canvas id="hue" class="hue"></canvas>
+        <div class="sub">Rampa <span class="muted desktop-only">Q oscurecer · W aclarar</span></div>
         <div id="ramp" class="swatches ramp"></div>
       </section>
 
-      <section class="panel">
+      <section class="panel" data-sheet="color">
         <div class="panel-head">
           <h3>Paleta</h3>
           <button id="pal-add" class="mini" title="Añadir color 1 (Shift+A)">+</button>
@@ -58,7 +100,7 @@
         <div id="recent" class="swatches"></div>
       </section>
 
-      <section class="panel layers-panel">
+      <section class="panel layers-panel" data-sheet="layers">
         <div class="panel-head">
           <h3>Capas</h3>
           <button id="ly-add" class="mini" title="Nueva capa (Shift+N)">+</button>
@@ -75,8 +117,8 @@
         </label>
       </section>
 
-      <section class="panel">
-        <div class="panel-head"><h3>Vista previa</h3></div>
+      <section class="panel" data-sheet="layers">
+        <div class="panel-head"><h3>Vista previa</h3><span class="muted small">clic para navegar</span></div>
         <canvas id="preview"></canvas>
       </section>
     </aside>
@@ -86,6 +128,7 @@
       <span id="st-pos"></span>
       <span id="st-color"></span>
       <span id="st-sel"></span>
+      <span id="st-frame"></span>
       <span class="grow"></span>
       <span id="st-flags"></span>
       <button id="st-size" title="Cambiar tamaño del lienzo"></button>
@@ -103,6 +146,8 @@
   <script src="js/doc.js"></script>
   <script src="js/view.js"></script>
   <script src="js/tools.js"></script>
+  <script src="js/gif.js"></script>
+  <script src="js/anim.js"></script>
   <script src="js/commands.js"></script>
   <script src="js/ui.js"></script>
   <script src="js/main.js"></script>
