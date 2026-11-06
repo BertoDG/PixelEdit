@@ -1,5 +1,7 @@
 # PixelEdit
 
+**Web:** https://pixeledit-smoky.vercel.app
+
 Editor de pixel art en el navegador para **animaciones y escenarios**, organizado por **capas**,
 pensado para trabajar rápido con el teclado en el escritorio y con el dedo en el iPhone.
 No necesita instalación ni compilación: abre `index.html` en Chrome, Edge, Firefox o Safari.
